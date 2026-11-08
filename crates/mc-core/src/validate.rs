@@ -18,7 +18,7 @@ use crate::error::{AppError, AppResult};
 use crate::jsstr::{cut16, longer16};
 use crate::types::{
     AgentRef, CreateSessionInput, InstructionRef, InstructionTarget, MemoryCreateInput, MemoryRef, Place, ProfilePatch,
-    ResumeMode, SettingsPatch, SkillRef, StartRunInput, TransferMode, FONT_SIZE, INSTRUCTION_LIMITS, MEMORY_LIMITS,
+    ResumeMode, SettingsPatch, SkillRef, StartRunInput, TabStrip, TransferMode, FONT_SIZE, INSTRUCTION_LIMITS, MEMORY_LIMITS,
     WORKFLOW_LIMITS,
 };
 
@@ -498,7 +498,7 @@ pub fn profile_patch(value: &Value) -> ProfilePatch {
 /// `settings:update`'s patch. Only these keys pass: `claudePath` (trimmed; anything but a text
 /// with something in it clears it), `fontSize` (rounded and held within the limits),
 /// `restoreTabs`, `notifications`, `limitAlerts`, `autoSwitch`, `tray` and `openAtLogin`
-/// (booleans). The rest of the settings are the backend's to set.
+/// (booleans), `tabStrip` (`top` or `side`). The rest of the settings are the backend's to set.
 pub fn settings_patch(value: &Value) -> SettingsPatch {
     let Some(p) = value.as_object() else {
         return SettingsPatch::default();
@@ -513,6 +513,11 @@ pub fn settings_patch(value: &Value) -> SettingsPatch {
         auto_switch: flag("autoSwitch"),
         tray: flag("tray"),
         open_at_login: flag("openAtLogin"),
+        tab_strip: p.get("tabStrip").and_then(Value::as_str).and_then(|s| match s {
+            "top" => Some(TabStrip::Top),
+            "side" => Some(TabStrip::Side),
+            _ => None,
+        }),
     }
 }
 
@@ -851,7 +856,8 @@ mod tests {
             "openAtLogin": true,
             "explorerMenu": true,
             "trayHintShown": true,
-            "skillFolders": ["C:\\x"]
+            "skillFolders": ["C:\x"],
+            "tabStrip": "side"
         }));
         assert_eq!(
             patch,
@@ -864,6 +870,7 @@ mod tests {
                 auto_switch: Some(true),
                 tray: Some(false),
                 open_at_login: Some(true),
+                tab_strip: Some(TabStrip::Side),
             }
         );
         // a claudePath that says nothing clears the setting; a missing one leaves it

@@ -350,8 +350,19 @@ pub struct AppSettings {
     /// Project folders the user added to the skill manager's list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_folders: Option<Vec<String>>,
+    /// Where an area draws its tabs: a row on top (the default) or a column on the left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_strip: Option<TabStrip>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// `AppSettings.tabStrip`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabStrip {
+    Top,
+    Side,
 }
 
 impl Default for AppSettings {
@@ -369,6 +380,7 @@ impl Default for AppSettings {
             open_at_login: None,
             tray_hint_shown: None,
             skill_folders: None,
+            tab_strip: None,
             extra: Extra::new(),
         }
     }
@@ -387,6 +399,7 @@ pub struct SettingsPatch {
     pub auto_switch: Option<bool>,
     pub tray: Option<bool>,
     pub open_at_login: Option<bool>,
+    pub tab_strip: Option<TabStrip>,
 }
 
 impl SettingsPatch {
@@ -397,6 +410,9 @@ impl SettingsPatch {
         }
         if let Some(size) = self.font_size {
             settings.font_size = size;
+        }
+        if let Some(strip) = self.tab_strip {
+            settings.tab_strip = Some(strip);
         }
         let flags = [
             (self.restore_tabs, &mut settings.restore_tabs),
