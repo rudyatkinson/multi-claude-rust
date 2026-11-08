@@ -375,7 +375,7 @@ When a newer version is found, a bar above the tabs offers **What's new**, **Ins
 
 ### One-time setup
 
-1. **Repository.** Releases come from the public repository `OWNER/multi-claude-rust`. Put the real owner in place of `OWNER` in `src-tauri/tauri.conf.json` → `plugins.updater.endpoints`; the app takes it from nowhere else. The repository must be public, since the app downloads without credentials.
+1. **Repository.** Releases come from the public repository `rudyatkinson/multi-claude-rust`; the address is in `src-tauri/tauri.conf.json` → `plugins.updater.endpoints`, and the app takes it from nowhere else. The repository must be public, since the app downloads without credentials.
 2. **Signing key.** Generate the key pair once, and choose a password when asked:
 
    ```sh

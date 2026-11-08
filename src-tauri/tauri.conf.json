@@ -60,8 +60,8 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": ["https://github.com/OWNER/multi-claude-rust/releases/latest/download/latest.json"],
-      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "endpoints": ["https://github.com/rudyatkinson/multi-claude-rust/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdDREFDMTU2QUQ4MUVFQ0QKUldUTjdvR3RWc0hhZk9vbHJCQmxOOE5BR1pVMHFmcTRjd0hxT3pvZXRoMjNDaTVaTTk1dTU1NDkK",
       "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"
