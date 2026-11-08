@@ -1,14 +1,17 @@
-//! Skills: roots, scan, read/save, create, rename, duplicate, transfer, delete, archives, Ask Claude (`src/main/skills/*`).
-//! Placeholder: filled in by its Phase 3 package. Keep `SkillService::new` with this signature so
-//! `state.rs` keeps compiling; if the service needs more, say so in the report.
+//! The skill manager (`src/main/skills/*`): the skills of every account and of the projects in
+//! sight, read and saved with conflict detection, made, copied, renamed, moved, deleted into the
+//! bin, packed into and brought in from archives, and handed to Claude in a session ("Ask Claude").
+//!
+//! [`scan`] finds the skills of a folder, [`files`] does the file-system work, [`store`] is the
+//! service, [`archive`] packs and unpacks zips, [`assist`] opens the session. Where the skills
+//! folders are is [`crate::library::roots`].
 
-pub struct SkillService {
-    _app: tauri::AppHandle,
-    _root: std::path::PathBuf,
-}
+pub mod archive;
+pub mod assist;
+pub mod files;
+pub mod scan;
+pub mod store;
+#[cfg(test)]
+mod tests;
 
-impl SkillService {
-    pub fn new(app: tauri::AppHandle, root: std::path::PathBuf) -> Self {
-        SkillService { _app: app, _root: root }
-    }
-}
+pub use store::{AssistRequest, Assisted, FileAction, SkillDeps, SkillService};
