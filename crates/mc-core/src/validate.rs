@@ -498,7 +498,8 @@ pub fn profile_patch(value: &Value) -> ProfilePatch {
 /// `settings:update`'s patch. Only these keys pass: `claudePath` (trimmed; anything but a text
 /// with something in it clears it), `fontSize` (rounded and held within the limits),
 /// `restoreTabs`, `notifications`, `limitAlerts`, `autoSwitch`, `tray` and `openAtLogin`
-/// (booleans), `tabStrip` (`top` or `side`). The rest of the settings are the backend's to set.
+/// (booleans), `tabStrip` (`top` or `side`), `checkUpdates` (boolean). The rest of the settings
+/// are the backend's to set.
 pub fn settings_patch(value: &Value) -> SettingsPatch {
     let Some(p) = value.as_object() else {
         return SettingsPatch::default();
@@ -513,6 +514,7 @@ pub fn settings_patch(value: &Value) -> SettingsPatch {
         auto_switch: flag("autoSwitch"),
         tray: flag("tray"),
         open_at_login: flag("openAtLogin"),
+        check_updates: flag("checkUpdates"),
         tab_strip: p.get("tabStrip").and_then(Value::as_str).and_then(|s| match s {
             "top" => Some(TabStrip::Top),
             "side" => Some(TabStrip::Side),
@@ -871,6 +873,7 @@ mod tests {
                 tray: Some(false),
                 open_at_login: Some(true),
                 tab_strip: Some(TabStrip::Side),
+                check_updates: None,
             }
         );
         // a claudePath that says nothing clears the setting; a missing one leaves it

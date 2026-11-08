@@ -353,6 +353,9 @@ pub struct AppSettings {
     /// Where an area draws its tabs: a row on top (the default) or a column on the left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_strip: Option<TabStrip>,
+    /// Look for a new version at start and once a day. On unless set to false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_updates: Option<bool>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -381,6 +384,7 @@ impl Default for AppSettings {
             tray_hint_shown: None,
             skill_folders: None,
             tab_strip: None,
+            check_updates: None,
             extra: Extra::new(),
         }
     }
@@ -400,6 +404,7 @@ pub struct SettingsPatch {
     pub tray: Option<bool>,
     pub open_at_login: Option<bool>,
     pub tab_strip: Option<TabStrip>,
+    pub check_updates: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -421,6 +426,7 @@ impl SettingsPatch {
             (self.auto_switch, &mut settings.auto_switch),
             (self.tray, &mut settings.tray),
             (self.open_at_login, &mut settings.open_at_login),
+            (self.check_updates, &mut settings.check_updates),
         ];
         for (value, slot) in flags {
             if value.is_some() {
