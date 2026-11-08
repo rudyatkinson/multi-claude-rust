@@ -40,6 +40,10 @@ pub mod library;
 pub mod memory;
 pub mod skills;
 
+// Phase 4 packages
+pub mod tray;
+pub mod updater;
+
 /// Builds and runs the Tauri application. Called from `main.rs`.
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -65,6 +69,8 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| app::boot::setup(app, root, startup))
         .on_page_load(app::boot::on_page_load)
         .on_window_event(app::window::on_window_event)

@@ -40,6 +40,8 @@ pub struct AppState {
     pub agents: crate::agents::AgentService,
     pub memory: crate::memory::MemoryService,
     pub instructions: crate::instructions::InstructionService,
+    /// The update the last check found, and which versions the window was told about.
+    pub updater: crate::updater::Updates,
     /// Windows build number, for the terminal's ConPTY quirks.
     pub os_build: Option<u32>,
     /// What this process was started for: a folder from the Explorer context menu, the login item.
@@ -49,7 +51,7 @@ pub struct AppState {
     pub pending_open_folders: Mutex<Vec<String>>,
     /// When the account statuses were last read (ms since the epoch; 0 for never).
     pub last_status_refresh: AtomicI64,
-    /// What has unsaved changes in the window's Library, for the quit question (Phase 4).
+    /// What has unsaved changes in the window's Library, for the quit question.
     pub unsaved: Mutex<Vec<String>>,
     /// Why the hook server could not start; told once the window listens.
     pub hook_problem: Mutex<Option<String>>,
@@ -74,6 +76,10 @@ pub struct Flags {
     pub layout_to_send: AtomicBool,
     /// The app is shutting down: ending the sessions must not empty the saved tabs.
     pub quitting: AtomicBool,
+    /// The window stays hidden at the start: `--hidden`, and a tray icon to bring it back with.
+    pub start_hidden: AtomicBool,
+    /// The quit question is open; asking again waits for its answer instead of opening another.
+    pub asking_to_quit: AtomicBool,
 }
 
 /// Reads a flag.
@@ -118,6 +124,7 @@ impl AppState {
             agents: crate::agents::AgentService::new(app.clone(), root.clone()),
             memory: crate::memory::MemoryService::new(app.clone(), root.clone()),
             instructions: crate::instructions::InstructionService::new(app.clone(), root.clone()),
+            updater: crate::updater::Updates::default(),
             os_build,
             startup,
             flags: Flags::default(),

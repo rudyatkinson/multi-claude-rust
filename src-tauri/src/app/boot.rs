@@ -1,6 +1,7 @@
 //! Starting and ending the app (the bottom of `src/main/index.ts`): the services are made and
-//! connected, claude is looked for, the accounts are checked, the usage probe starts; a second
-//! instance hands over its arguments; quitting saves the tabs and ends the sessions.
+//! connected, the tray icon and the start with the system are set up, claude is looked for, the
+//! accounts are checked, the usage probe starts; a second instance hands over its arguments;
+//! quitting saves the tabs and ends the sessions.
 
 use std::sync::atomic::Ordering;
 
@@ -56,13 +57,14 @@ pub fn setup(app: &mut App, root: std::path::PathBuf, startup: StartupArgs) -> R
         log::warn!("{e}");
         *lock(&state.hook_problem) = Some(e.to_string());
     }
+    shell_integration(&handle, &state);
 
     // a window whose page never reports ready is shown anyway
     let fallback = handle.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(window::SHOW_FALLBACK).await;
         if let Some(state) = app_state(&fallback) {
-            if !is(&state.flags.window_shown) && !state.startup.hidden {
+            if !is(&state.flags.window_shown) && !is(&state.flags.start_hidden) {
                 log::warn!("the window did not report ready; showing it anyway");
                 window::show(&state);
             }
@@ -70,6 +72,47 @@ pub fn setup(app: &mut App, root: std::path::PathBuf, startup: StartupArgs) -> R
     });
     tauri::async_runtime::spawn(boot(handle));
     Ok(())
+}
+
+/// The tray icon, the macOS app menu and the start with the system. Whether a tray icon was made
+/// decides what `--hidden` and closing the window do.
+fn shell_integration(app: &AppHandle, state: &AppState) {
+    // once for the app: the tray menu is built again and again
+    app.on_menu_event(|app, event| {
+        crate::tray::on_menu_event(app, &event);
+        #[cfg(target_os = "macos")]
+        {
+            crate::app::quit::on_menu_event(app, &event);
+        }
+    });
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = crate::app::quit::install_app_menu(app) {
+            log::warn!("app menu: {e}");
+        }
+    }
+    let tray = state.settings().tray != Some(false) && crate::tray::create(app);
+    // without a tray icon a hidden window could not be brought back
+    state.flags.start_hidden.store(state.startup.hidden && tray, Ordering::SeqCst);
+    // the uninstaller removes the entry, and an update may have moved the app
+    if state.settings().open_at_login.is_some() {
+        apply_login_item(state);
+    }
+}
+
+/// `applyLoginItem`: registers or removes the start with the system (`settings.openAtLogin`),
+/// which starts the app with `--hidden` (the autostart plugin in `lib.rs`). Only the installed
+/// app has a stable path to register, and Linux has no such entry.
+pub fn apply_login_item(state: &AppState) {
+    if tauri::is_dev() || cfg!(target_os = "linux") {
+        return;
+    }
+    let Some(autostart) = state.app.try_state::<tauri_plugin_autostart::AutoLaunchManager>() else { return };
+    let on = state.settings().open_at_login == Some(true);
+    match if on { autostart.enable() } else { autostart.disable() } {
+        Ok(()) => log::info!("start with the system: {}", if on { "on" } else { "off" }),
+        Err(e) => log::warn!("start with the system: {e}"),
+    }
 }
 
 /// The part of the start that waits for processes: claude is looked for (on macOS with the login
@@ -162,7 +205,7 @@ pub fn shutdown(state: &AppState) {
     }
     state.tabs.persist(&state.sessions.saved_tabs());
     state.tabs.quit();
-    // Phase 4: the tray icon goes
+    crate::tray::destroy(&state.app);
     state.runs.stop_all();
     state.auto_switch.stop();
     state.usage.stop();
@@ -170,7 +213,10 @@ pub fn shutdown(state: &AppState) {
     state.hooks.stop();
 }
 
-/// The run loop's events.
+/// The run loop's events. `Exit` is also how Windows ending the session (logoff, shutdown, an
+/// installer's restart manager) arrives: the event loop ends on `WM_ENDSESSION` and the process
+/// exits right after, so the tabs are saved there. Quitting from the window, the tray or Cmd+Q
+/// asks first and arrives here already shut down (`quit::request_quit`).
 pub fn on_run_event(app: &AppHandle, event: RunEvent) {
     match event {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {

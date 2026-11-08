@@ -1,5 +1,6 @@
 //! The main window: its first appearance, bringing it to the front, and what its focus and its
-//! closing set off (`createWindow` and `bringToFront` of `src/main/index.ts`).
+//! closing set off (`createWindow` and `bringToFront` of `src/main/index.ts`). Closing it hides it
+//! while there is a tray icon, and quits (after asking) when there is none.
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -7,6 +8,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager, UserAttentionType, WebviewWindow, Window, WindowEvent};
 
 use crate::app::open_folder::flush_pending;
+use crate::app::quit::{hide_to_tray, request_quit};
 use crate::app::{now_ms, refresh_all_profiles, state as app_state, STATUS_REFRESH_MS};
 use crate::state::{is, AppState};
 
@@ -43,9 +45,9 @@ pub fn show(state: &AppState) {
 }
 
 /// The renderer reported ready: the window appears the first time, unless the app was started
-/// hidden (`--hidden`).
+/// hidden (`--hidden`) with a tray icon to bring it back.
 pub fn first_show(state: &AppState) {
-    if !is(&state.flags.window_shown) && !state.startup.hidden {
+    if !is(&state.flags.window_shown) && !is(&state.flags.start_hidden) {
         show(state);
     }
 }
@@ -79,9 +81,18 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
     let Some(state) = app_state(app) else { return };
     match event {
         WindowEvent::Focused(true) => focused(&state),
-        WindowEvent::CloseRequested { .. } => {
-            // Phase 4: with a tray icon the window only hides, and running sessions ask first
-            crate::app::boot::shutdown(&state);
+        WindowEvent::CloseRequested { api, .. } => {
+            // the app is on its way out
+            if is(&state.flags.quitting) {
+                return;
+            }
+            api.prevent_close();
+            if crate::tray::exists(app) {
+                // the sessions keep running; the tray icon brings the window back
+                hide_to_tray(&state);
+            } else {
+                request_quit(app);
+            }
         }
         _ => {}
     }

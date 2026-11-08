@@ -75,14 +75,20 @@ pub fn app_ready(state: State<'_, AppState>) -> CmdResult<()> {
 }
 
 /// `settings:update`: only the keys the window may change (`validate::settings_patch`). A new
-/// claude path is looked for at once and the accounts are checked with it. `tray` and
-/// `openAtLogin` are only stored until Phase 4 applies them.
+/// claude path is looked for at once and the accounts are checked with it; `tray` makes or
+/// removes the tray icon, `openAtLogin` registers or removes the start with the system.
 #[tauri::command]
 pub async fn settings_update(state: State<'_, AppState>, patch: Option<Value>) -> CmdResult<()> {
     let patch = validate::settings_patch(&patch.unwrap_or(Value::Null));
     let config = state.profiles.config();
     let path_changed = patch.claude_path.as_ref().is_some_and(|next| config.with(|c| *next != c.settings.claude_path));
     config.update(|c| patch.apply_to(&mut c.settings))?;
+    if patch.tray.is_some() {
+        crate::tray::apply_setting(&state.app);
+    }
+    if patch.open_at_login.is_some() {
+        crate::app::boot::apply_login_item(&state);
+    }
     if path_changed {
         locate_claude(&state).await;
         let app = state.app.clone();

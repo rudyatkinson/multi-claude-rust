@@ -63,7 +63,7 @@ fn wire_sessions(app: &AppHandle, state: &AppState) {
         state.tabs.persist(&state.sessions.saved_tabs());
         state.alerts.prune(list.iter().map(|s| s.id.as_str()));
         state.runs.sessions_changed(list.iter().map(RunSession::from).collect());
-        // Phase 4: the tray tooltip counts the sessions
+        crate::tray::refresh(&handle);
         // a restored arrangement travels with the list that introduces its sessions, and only with it
         state.flags.layout_to_send.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| state.tabs.layout())
     }));
