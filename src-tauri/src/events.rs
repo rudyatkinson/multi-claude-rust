@@ -4,6 +4,8 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+pub use mc_core::types::{Notice, NoticeLevel};
+
 pub const PTY_DATA: &str = "pty:data";
 pub const SESSIONS_CHANGED: &str = "sessions:changed";
 pub const PROFILES_CHANGED: &str = "profiles:changed";
@@ -24,21 +26,7 @@ pub fn emit<T: Serialize + Clone>(app: &AppHandle, name: &str, payload: T) {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Notice {
-    pub level: NoticeLevel,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NoticeLevel {
-    Info,
-    Warn,
-    Error,
-}
-
+/// Sends `app:notice`: a line the window shows as a toast.
 pub fn notice(app: &AppHandle, level: NoticeLevel, message: impl Into<String>) {
     emit(app, APP_NOTICE, Notice { level, message: message.into() });
 }

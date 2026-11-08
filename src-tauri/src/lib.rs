@@ -2,6 +2,7 @@
 //! the hook server, profiles, usage, workflows, the Library services, tray and OS integration.
 //! Pure logic lives in `mc-core`; this crate is the I/O around it plus the Tauri command surface.
 
+pub mod app;
 pub mod commands;
 pub mod error;
 pub mod events;
@@ -24,40 +25,41 @@ pub mod tab_store;
 pub mod token_vault;
 pub mod usage;
 
-use tauri::Manager;
-
 /// Builds and runs the Tauri application. Called from `main.rs`.
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-            // A second instance passed its arguments to us; Phase 1 integration turns them into
-            // --open-folder / --quit handling. For now: bring the window to the front.
-            log::info!("second instance: argv={argv:?} cwd={cwd}");
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.unminimize();
-                let _ = win.set_focus();
-            }
-        }))
+    let (root, isolated) = match state::app_root() {
+        Ok(found) => found,
+        Err(e) => {
+            log::error!("Multi Claude cannot start: {e}");
+            std::process::exit(1);
+        }
+    };
+    let startup = app::boot::startup_args();
+    let mut context = tauri::generate_context!();
+    if isolated {
+        app::boot::isolate(&mut context, &root);
+    }
+
+    let app = tauri::Builder::default()
+        // first, so that a second start hands over its arguments before anything else happens
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| app::boot::second_instance(app, argv)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--hidden"]),
-        ))
-        .setup(|app| {
-            let state = state::AppState::new(app.handle().clone())?;
-            app.manage(state);
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-            }
-            Ok(())
-        })
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .setup(move |app| app::boot::setup(app, root, startup))
+        .on_page_load(app::boot::on_page_load)
+        .on_window_event(app::window::on_window_event)
         .invoke_handler(commands::handler())
-        .run(tauri::generate_context!())
-        .expect("error while running Multi Claude");
+        .build(context);
+    match app {
+        Ok(app) => app.run(app::boot::on_run_event),
+        Err(e) => {
+            log::error!("Multi Claude cannot start: {e}");
+            std::process::exit(1);
+        }
+    }
 }

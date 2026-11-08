@@ -1,25 +1,58 @@
 //! Commands of the `sessions` package (`sessions:*` and `pty:*` of `src/main/ipc.ts`).
 //! Each command: validate with `mc_core::validate`, call the service on `AppState`, return `CmdResult<T>`.
 //!
-//! Left to integration, because they need other services:
-//! - `sessions_create(input)`: `validate::session_input`, profile and claude path, `prepareSettings`,
-//!   `SessionManager::plan` + `create` with the place, `rememberFolder`.
-//! - `sessions_restart(id, continueLast)`: refuses a `moving` session ("This conversation is being
-//!   moved to another account."), `hasTranscript` decides `{ id }` or `last`, then `replace` with
-//!   `request_of(id)`.
-//! - `sessions_transfer(id, profileId)`: `transferSession` (uses `end`, `set_moving`, `replace`, `set_arrived`).
-//! - `sessions_reveal_folder(id)`: `cwd_of(id)` ("Session not found") opened with the opener plugin.
-//! - `sessions_open_external(input)`: the external terminal launcher.
-//! - `pty_write`: after the write, `if mc_core::terminal_input::is_typing(&data) { sessionTyped(id) }`.
+//! `sessions:transfer` (moving a conversation to another account) and `sessions:openExternal`
+//! (the external terminal) are Phase 2; see `commands::stubs`.
 
 use mc_core::error::AppError;
-use mc_core::types::{AttachResult, PtyResize, PtyWrite};
+use mc_core::terminal_input::is_typing;
+use mc_core::types::{AttachResult, PtyResize, PtyWrite, SessionInfo, SessionKind, SessionRequest, SessionResume, TurnEvent};
 use mc_core::validate;
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 
-use crate::error::CmdResult;
+use crate::app::launch::{restart_session, start_session};
+use crate::app::{note_turn, remember_folder};
+use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
+
+/// `sessions:create`: a Claude tab in a folder that exists, for an account that exists, where the
+/// window asked for it. The folder goes to the top of the recent folders.
+#[tauri::command]
+pub async fn sessions_create(state: State<'_, AppState>, input: Option<Value>) -> CmdResult<SessionInfo> {
+    let input = validate::session_input(&input.unwrap_or(Value::Null))?;
+    let request = SessionRequest {
+        profile_id: input.profile_id,
+        cwd: input.cwd,
+        kind: SessionKind::Claude,
+        resume: input.resume.map(SessionResume::Mode),
+        name: None,
+        launch: None,
+        prompt: None,
+    };
+    let info = start_session(&state, &request, input.place)?;
+    remember_folder(&state, &request.cwd);
+    Ok(info)
+}
+
+/// `sessions:restart`: the session again in its tab; `continueLast` (only a real `true`)
+/// continues its conversation.
+#[tauri::command]
+pub async fn sessions_restart(state: State<'_, AppState>, id: String, continue_last: Option<Value>) -> CmdResult<SessionInfo> {
+    let id = validate::id(&id, "session")?;
+    let continue_last = continue_last.as_ref().is_some_and(validate::flag);
+    Ok(restart_session(&state, id, continue_last)?)
+}
+
+/// `sessions:revealFolder`: the session's folder in the file manager. The folder comes from the
+/// session, not from the caller.
+#[tauri::command]
+pub async fn sessions_reveal_folder(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let id = validate::id(&id, "session")?;
+    let cwd = state.sessions.cwd_of(id).ok_or("Session not found")?;
+    app.opener().open_path(cwd, None::<&str>).map_err(|e| CmdError(e.to_string()))
+}
 
 /// `sessions:attach`: the session, its replay and how much output it has produced; null for an
 /// unknown session.
@@ -61,6 +94,11 @@ pub fn sessions_rename(state: State<'_, AppState>, id: String, name: Option<Valu
 #[tauri::command]
 pub fn pty_write(state: State<'_, AppState>, payload: PtyWrite) -> CmdResult<()> {
     state.sessions.write(&payload.id, &payload.data);
+    // the terminal's own reports travel this way too: its focus, the mouse, its answers
+    if is_typing(&payload.data) {
+        // Phase 2: `workflowRuns.input(id)`
+        note_turn(&state, &payload.id, &TurnEvent::Typed);
+    }
     Ok(())
 }
 

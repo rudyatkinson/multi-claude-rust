@@ -1,42 +1,41 @@
-//! Commands of the `profiles` package: `profiles:update`, `profiles:setToken`,
-//! `profiles:syncFromMain`, `profiles:openConfigDir` and `folders:setAccount`.
+//! Commands of the `profiles` package: `profiles:*` and `folders:setAccount`.
 //!
-//! Left to the integration, as they need the sessions and the usage tracker:
-//! - `profiles_create`: `ProfileService::create`, then for a login account a `login` session in
-//!   the new config dir (its error becomes a warning); answers
-//!   `CreateProfileResult { profile: view(id), loginSession, warnings }`.
-//! - `profiles_delete`: `ProfileService::delete` (the sessions are closed through the
-//!   `set_close_sessions` hook).
-//! - `profiles_login`: refused for a token account ("A token account has no browser login. Use
-//!   \"Replace token\" instead."); else a `login` session in the config dir (home for Main).
-//! - `profiles_logout`: `ProfileService::logout`.
-//! - `profiles_refresh_status`: `ProfileService::refresh_status`, its warning as a `warn` notice,
-//!   then the usage refresh of the account.
-//!
-//! The commands run on the async runtime (`async fn`), not on the main thread: they touch files.
+//! The commands run on the async runtime (`async fn`), not on the main thread: they touch files
+//! and run `claude auth`.
 
-use std::sync::PoisonError;
-
-use mc_core::types::{AppChanged, SyncResult};
+use mc_core::error::AppError;
+use mc_core::types::{AuthKind, CreateProfileInput, CreateProfileResult, SessionInfo, SessionKind, SessionRequest, SyncResult};
 use mc_core::validate;
 use serde_json::Value;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::app::launch::start_session;
+use crate::app::{emit_app_changed, notice};
 use crate::error::{CmdError, CmdResult};
-use crate::events;
+use crate::events::NoticeLevel;
 use crate::state::AppState;
 
-/// Sends `app:changed`: the settings, the claude binary, the recent folders and the folder pins.
-pub fn emit_app_changed(state: &AppState) {
-    let claude = state.claude.read().unwrap_or_else(PoisonError::into_inner).clone();
-    let payload = state.profiles.config().with(|c| AppChanged {
-        settings: c.settings.clone(),
-        claude,
-        recent_folders: c.recent_folders.clone(),
-        folder_accounts: c.folder_accounts.clone(),
-    });
-    events::emit(&state.app, events::APP_CHANGED, payload);
+/// A `login` session for an account: `claude auth login` in a tab.
+fn login_request(profile_id: &str, cwd: String) -> SessionRequest {
+    SessionRequest { profile_id: profile_id.to_owned(), cwd, kind: SessionKind::Login, resume: None, name: None, launch: None, prompt: None }
+}
+
+/// `profiles:create`: makes the account; a browser-login account gets its login tab right away,
+/// in its new config dir (when that cannot start, it is one more warning).
+#[tauri::command]
+pub async fn profiles_create(state: State<'_, AppState>, input: CreateProfileInput) -> CmdResult<CreateProfileResult> {
+    let (profile, mut warnings) = state.profiles.create(&input)?;
+    let mut login_session = None;
+    if profile.auth != Some(AuthKind::Token) {
+        let cwd = profile.config_dir.clone().unwrap_or_else(|| state.home_dir().to_string_lossy().into_owned());
+        match start_session(&state, &login_request(&profile.id, cwd), None) {
+            Ok(info) => login_session = Some(info),
+            Err(e) => warnings.push(e.to_string()),
+        }
+    }
+    let profile = state.profiles.view(&profile.id).ok_or("Profile not found")?;
+    Ok(CreateProfileResult { profile, login_session, warnings })
 }
 
 /// `profiles:update`: name, color, memory sharing.
@@ -48,6 +47,32 @@ pub async fn profiles_update(state: State<'_, AppState>, id: String, patch: Opti
     Ok(())
 }
 
+/// `profiles:delete`: the account's sessions closed, its login removed, its folder in the trash.
+#[tauri::command]
+pub async fn profiles_delete(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let id = validate::id(&id, "profile")?;
+    Ok(state.profiles.delete(id).await?)
+}
+
+/// `profiles:login`: a login tab for a browser-login account, in its config dir (home for Main).
+#[tauri::command]
+pub async fn profiles_login(state: State<'_, AppState>, id: String) -> CmdResult<SessionInfo> {
+    let id = validate::id(&id, "profile")?;
+    let profile = state.profiles.get(id).ok_or("Profile not found")?;
+    if profile.auth == Some(AuthKind::Token) {
+        return Err(AppError::refused("A token account has no browser login. Use \"Replace token\" instead.").into());
+    }
+    let cwd = profile.config_dir.clone().unwrap_or_else(|| state.home_dir().to_string_lossy().into_owned());
+    Ok(start_session(&state, &login_request(&profile.id, cwd), None)?)
+}
+
+/// `profiles:logout`: the account's sessions closed, `claude auth logout`, its status read again.
+#[tauri::command]
+pub async fn profiles_logout(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let id = validate::id(&id, "profile")?;
+    Ok(state.profiles.logout(id).await?)
+}
+
 /// `profiles:setToken`: replaces the token of a token account and reads its status again.
 #[tauri::command]
 pub async fn profiles_set_token(state: State<'_, AppState>, id: String, token: String) -> CmdResult<()> {
@@ -55,6 +80,18 @@ pub async fn profiles_set_token(state: State<'_, AppState>, id: String, token: S
     let token = validate::str(&token, "token", validate::STR_MAX)?;
     state.profiles.set_token(id, token)?;
     state.profiles.refresh_status(id).await;
+    Ok(())
+}
+
+/// `profiles:refreshStatus`: reads the account's status, warns when another account is signed in
+/// to the same one, and asks `/usage` again; the caller shows progress until the numbers are in.
+#[tauri::command]
+pub async fn profiles_refresh_status(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let id = validate::id(&id, "profile")?;
+    if let Some(warning) = state.profiles.refresh_status(id).await {
+        notice(&state, NoticeLevel::Warn, warning);
+    }
+    state.usage.refresh(id).await;
     Ok(())
 }
 

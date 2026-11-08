@@ -229,11 +229,10 @@ impl ProfileService {
     }
 
     /// `envFor`: the environment for an account's processes (`buildProfileEnv` over this
-    /// process's variables), with the account's token for a token account. `dev` also drops the
-    /// variables of the development tooling.
+    /// process's variables, with the login shell's PATH on macOS once it was imported), with the
+    /// account's token for a token account. `dev` also drops the variables of the development tooling.
     pub fn env_for_with(&self, profile: &Profile, dev: bool) -> BTreeMap<String, String> {
-        let base: BTreeMap<String, String> =
-            std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect();
+        let base = crate::claude_binary::process_env();
         let tokens = &self.tokens;
         build_profile_env(&base, profile, |enc| (enc == TOKEN_MARKER).then(|| tokens.load(&profile.id)).flatten(), dev)
     }

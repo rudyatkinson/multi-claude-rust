@@ -1,7 +1,7 @@
 //! Commands of the `usage` package. The renderer has no usage channel of its own: it gets the
-//! numbers with `app:getState` and `usage:changed`, and `profiles:refreshStatus` (a profiles
-//! command, wired at integration) checks the account and then asks `/usage` again, which is
-//! [`usage_refresh`]. It is not registered with the builder.
+//! numbers with `app:getState` and `usage:changed`, and `profiles:refreshStatus` checks the
+//! account and then asks `/usage` again, as [`usage_refresh`] does. It is not registered with
+//! the builder.
 
 use tauri::State;
 

@@ -63,16 +63,9 @@ impl Outlet for WindowOutlet {
     }
 }
 
-/// What the status line reports about a session (`SessionMeta` of `src/main/usage/normalize.ts`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionMeta {
-    pub claude_session_id: Option<String>,
-    /// Where Claude Code keeps the conversation.
-    pub transcript_path: Option<String>,
-    pub model: Option<String>,
-    /// Whole percent of the context window in use.
-    pub context_pct: Option<u32>,
-}
+/// What the status line reports about a session: its conversation, model and context use. The
+/// usage tracker reads it from the status files and hands it to [`SessionManager::set_meta`].
+pub use mc_core::usage::SessionMeta;
 
 /// Everything a session is started from, decided before anything starts: the account's
 /// environment, the program and its arguments. [`SessionManager::plan`] builds one from a

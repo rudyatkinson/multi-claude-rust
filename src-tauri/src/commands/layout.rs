@@ -1,7 +1,7 @@
 //! Commands of the `layout` package: the window reports how its tabs are arranged.
 
-use mc_core::layout::parse_layout;
-use mc_core::types::UiLayout;
+use mc_core::layout::{parse_layout, reconcile};
+use mc_core::types::{SessionRef, UiLayout};
 use tauri::State;
 
 use crate::error::CmdResult;
@@ -12,16 +12,15 @@ use crate::state::AppState;
 /// Electron version ignored it. A payload that is not even shaped like a layout fails to
 /// deserialize, which a send ignores as well.
 ///
-/// The Electron version then reconciled the layout with the session list and scheduled a save of
-/// `tabs.json` (`setLayout` in `src/main/index.ts`). The session list lives in the session
-/// service, so integration adds those two steps here, after `note_layout`:
-/// `state.tabs.update_layout(|l| reconcile(l, &refs_of_the_sessions))` and
-/// `state.tabs.persist(&open_tabs)`.
+/// Then, as `setLayout` in `src/main/index.ts` did, the layout is reconciled with the session
+/// list, so that the app's copy never names a session that is gone, and `tabs.json` is saved soon.
 #[tauri::command]
 pub fn ui_layout(payload: UiLayout, state: State<'_, AppState>) -> CmdResult<()> {
     let raw = serde_json::to_value(&payload).map_err(|e| e.to_string())?;
     if let Some(layout) = parse_layout(&raw) {
-        state.tabs.note_layout(layout);
+        let refs: Vec<SessionRef> = state.sessions.list().into_iter().map(|s| SessionRef { id: s.id, replaces: None, place: None }).collect();
+        state.tabs.note_layout(reconcile(&layout, &refs).into_owned());
+        state.tabs.persist(&state.sessions.saved_tabs());
     }
     Ok(())
 }
