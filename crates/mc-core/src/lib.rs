@@ -26,3 +26,12 @@ pub mod terminal_title;
 pub mod tray_model;
 pub mod turn;
 pub mod usage;
+
+// Phase 2 and 3 packages
+pub mod auto_switch;
+pub mod conversations;
+pub mod frontmatter;
+pub mod paths_input;
+pub mod text_file;
+pub mod transfer;
+pub mod workflow;
