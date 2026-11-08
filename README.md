@@ -13,7 +13,7 @@ npm run tauri build    # installer: target/release/bundle/nsis/Multi Claude_<ver
                        # on a Mac: target/release/bundle/dmg/Multi Claude_<version>_<arch>.dmg
 ```
 
-The Cargo workspace keeps `target` at the top of the repository, not in `src-tauri`. `npm run dist` is the same build; on a Mac, add `-- --target x86_64-apple-darwin` for Intel. The build also signs the updater's files and stops without the signing key: see [Building locally](#building-locally).
+The Cargo workspace keeps `target` at the top of the repository, not in `src-tauri`. `npm run dist` is the same build. Only Apple silicon Macs are built and released; an Intel Mac would need its own build (`-- --target x86_64-apple-darwin`). The build also signs the updater's files and stops without the signing key: see [Building locally](#building-locally).
 
 Other commands: `npm test` (the window's tests), `cargo test --workspace` or `npm run rust:test` (the backend's tests), `npm run typecheck`, `npm run build` (only the window, into `dist/`), `npm run build:shell` (the context menu DLL), `npx tauri icon src-tauri/icons/source.png` (the app icons; the tray icons `tray.png` and `tray@2x.png` are separate).
 
@@ -397,8 +397,8 @@ When a newer version is found, a bar above the tabs offers **What's new**, **Ins
    git push origin v0.6.1
    ```
 
-4. `.github/workflows/release.yml` builds Windows x64, macOS Apple silicon and macOS Intel one after the other, and puts the installers, their `.sig` files and `latest.json` into a **draft** release.
-5. Check that the draft's `latest.json` lists `windows-x86_64`, `darwin-aarch64` and `darwin-x86_64`, then publish it. Installed apps see the update from that moment; a draft or a prerelease is never offered.
+4. `.github/workflows/release.yml` builds Windows x64 and macOS Apple silicon one after the other, and puts the installers, their `.sig` files and `latest.json` into a **draft** release.
+5. Check that the draft's `latest.json` lists `windows-x86_64` and `darwin-aarch64`, then publish it. Installed apps see the update from that moment; a draft or a prerelease is never offered.
 
 `.github/workflows/ci.yml` runs the type check, the window's tests, a build of the window and the tests of the Rust workspace on every push and pull request (Windows only).
 

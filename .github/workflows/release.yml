@@ -4,7 +4,7 @@
 # Installed apps only see the update once the draft is published: they read
 # /releases/latest/download/latest.json, and "latest" is the newest published release that is
 # not a prerelease. Before publishing, check that latest.json lists windows-x86_64,
-# darwin-aarch64 and darwin-x86_64.
+# darwin-aarch64. Intel Macs are not built.
 #
 # Needs the repository secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 # (see "Updates" in README.md); GITHUB_TOKEN is provided by GitHub.
@@ -35,9 +35,6 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
