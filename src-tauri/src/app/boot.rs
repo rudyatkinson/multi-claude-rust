@@ -51,6 +51,7 @@ pub fn setup(app: &mut App, root: std::path::PathBuf, startup: StartupArgs) -> R
 
     state.usage.prune(state.profiles.list().iter().map(|p| p.id.as_str()));
     state.usage.start();
+    crate::sleep::start(&handle);
     crate::workflows::boot(&state);
     crate::updater::start(&handle);
     // without it the app works as before: tabs do not report their turns, and workflows cannot run

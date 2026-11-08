@@ -16,6 +16,8 @@ export type ShortcutAction =
   | { type: 'area'; step: 1 | -1 }
   /** Search the past conversations of all accounts. */
   | { type: 'history' }
+  /** Put the active tab to sleep, or wake it. */
+  | { type: 'sleep' }
 
 /** The parts of a KeyboardEvent the table looks at. */
 export interface KeyLike {
@@ -34,7 +36,8 @@ const WITH_SHIFT: Record<string, ShortcutAction> = {
   b: { type: 'sidebar' },
   f: { type: 'search' },
   d: { type: 'split' },
-  h: { type: 'history' }
+  h: { type: 'history' },
+  z: { type: 'sleep' }
 }
 
 /**

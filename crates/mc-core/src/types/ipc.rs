@@ -32,6 +32,9 @@ pub mod channel {
     pub const SESSIONS_TRANSFER: &str = "sessions:transfer";
     pub const SESSIONS_RESTART: &str = "sessions:restart";
     pub const SESSIONS_OPEN_EXTERNAL: &str = "sessions:openExternal";
+    pub const SESSIONS_SLEEP: &str = "sessions:sleep";
+    pub const SESSIONS_WAKE: &str = "sessions:wake";
+    pub const SESSIONS_SET_KEEP_AWAKE: &str = "sessions:setKeepAwake";
     pub const DIALOG_PICK_FOLDER: &str = "dialog:pickFolder";
     pub const FS_FOLDER_FOR: &str = "fs:folderFor";
     pub const CONVERSATIONS_LIST: &str = "conversations:list";
@@ -109,6 +112,7 @@ pub mod channel {
     pub const UI_LAYOUT: &str = "ui:layout";
     pub const SESSION_ATTENTION: &str = "session:attention";
     pub const UI_UNSAVED: &str = "ui:unsaved";
+    pub const UI_VISIBLE: &str = "ui:visible";
 
     // backend -> renderer
     pub const PTY_DATA: &str = "pty:data";
@@ -129,7 +133,7 @@ pub mod channel {
 use channel as c;
 
 /// Request/response calls (renderer -> backend), in the TypeScript order.
-pub const INVOKE_CHANNELS: [&str; 90] = [
+pub const INVOKE_CHANNELS: [&str; 93] = [
     c::APP_GET_STATE,
     c::APP_READY,
     c::PROFILES_CREATE,
@@ -150,6 +154,9 @@ pub const INVOKE_CHANNELS: [&str; 90] = [
     c::SESSIONS_TRANSFER,
     c::SESSIONS_RESTART,
     c::SESSIONS_OPEN_EXTERNAL,
+    c::SESSIONS_SLEEP,
+    c::SESSIONS_WAKE,
+    c::SESSIONS_SET_KEEP_AWAKE,
     c::DIALOG_PICK_FOLDER,
     c::FS_FOLDER_FOR,
     c::CONVERSATIONS_LIST,
@@ -223,7 +230,7 @@ pub const INVOKE_CHANNELS: [&str; 90] = [
 ];
 
 /// Fire-and-forget messages (renderer -> backend).
-pub const SEND_CHANNELS: [&str; 5] = [c::PTY_WRITE, c::PTY_RESIZE, c::UI_LAYOUT, c::SESSION_ATTENTION, c::UI_UNSAVED];
+pub const SEND_CHANNELS: [&str; 6] = [c::PTY_WRITE, c::PTY_RESIZE, c::UI_LAYOUT, c::SESSION_ATTENTION, c::UI_UNSAVED, c::UI_VISIBLE];
 
 /// Pushed events (backend -> renderer).
 pub const EVENT_CHANNELS: [&str; 13] = [
@@ -282,6 +289,16 @@ pub struct SessionAttention {
 pub struct UnsavedPayload {
     #[serde(default)]
     pub items: Vec<String>,
+}
+
+/// `ui:visible`: the session whose terminal the user is looking at â€” the tab in front in the area
+/// that has the keyboard, while the window has the focus. Null for none (a panel, or the window
+/// in the background). Such a tab is never put to sleep for being idle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiVisible {
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 /// How many drafts a quit question names, and how much of each (`cleanUnsaved`).

@@ -22,6 +22,7 @@ import {
   type StripSide
 } from '@shared/layout'
 import { pathsAsInput } from '@shared/paths'
+import { sleepLabel } from '@shared/sleep'
 import { dropTarget, type DropTarget } from '@shared/tabOrder'
 import { tabStripOf, type SessionInfo } from '@shared/types'
 import { errorMessage } from '../api'
@@ -40,9 +41,10 @@ import {
   splitTab,
   splitTabRoot,
   startTabDrag,
-  useStore
+  useStore,
+  wakeSession
 } from '../store'
-import { fitTerminal, focusTerminal, mountTerminal, pasteText, setTerminalVisible } from '../terminal/terminalRegistry'
+import { fitTerminal, focusTerminal, mountTerminal, pasteText, setTerminalAsleep, setTerminalVisible } from '../terminal/terminalRegistry'
 import { GroupTabs, type StripMark } from './GroupTabs'
 import { LibraryPanel } from './LibraryPanel'
 import { ArrivedBar, LimitBar } from './LimitBar'
@@ -98,10 +100,16 @@ function TerminalSlot({ session, rect, focused, searching, color }: SlotProps) {
     if (focused) focusTerminal(session.id)
   }, [focused, session.id])
 
+  // asleep: the terminal keeps what it showed; a key in it or a click on it wakes the session
+  const asleep = session.status === 'sleeping'
+  useEffect(() => {
+    setTerminalAsleep(session.id, asleep ? () => void wakeSession(session.id) : null)
+  }, [asleep, session.id])
+
   const exited = session.status === 'exited'
   return (
     <div
-      className={`slot${shown ? ' shown' : ''}${focused ? ' focused' : ''}`}
+      className={`slot${shown ? ' shown' : ''}${focused ? ' focused' : ''}${asleep ? ' asleep' : ''}`}
       style={{ '--accent': color, ...(rect && { left: rect.x, top: rect.y, width: rect.w, height: rect.h }) } as CSSProperties}
       // a click anywhere in another area moves the keyboard there
       onMouseDownCapture={() => {
@@ -109,6 +117,23 @@ function TerminalSlot({ session, rect, focused, searching, color }: SlotProps) {
       }}
     >
       <div className="term-host" ref={host} />
+      {asleep && shown && (
+        <div
+          className="sleep-overlay"
+          title={sleepLabel(session.sleptAt)}
+          // keeps the keyboard where it is until the session is awake; then it goes to the terminal
+          onMouseDown={(e) => {
+            e.preventDefault()
+            void wakeSession(session.id)
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button type="button" className="btn sleep-wake" onClick={() => void wakeSession(session.id)}>
+            <span className="tab-state asleep" />
+            Sleeping · Wake
+          </button>
+        </div>
+      )}
       {searching && <SearchBar id={session.id} />}
       {moving && <div className="exit-bar">Moving the conversation to the other account…</div>}
       {!moving && shown && <ArrivedBar session={session} />}

@@ -19,6 +19,7 @@ pub mod layout;
 pub mod open_folder_args;
 pub mod open_target;
 pub mod settings_merge;
+pub mod sleep;
 pub mod slug;
 pub mod tab_order;
 pub mod terminal_input;

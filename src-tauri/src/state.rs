@@ -55,6 +55,9 @@ pub struct AppState {
     pub last_status_refresh: AtomicI64,
     /// What has unsaved changes in the window's Library, for the quit question.
     pub unsaved: Mutex<Vec<String>>,
+    /// The session the user is looking at (`ui:visible`): in front in the area that has the
+    /// keyboard, while the window has the focus. It is never put to sleep for being idle.
+    pub visible: Mutex<Option<String>>,
     /// Why the hook server could not start; told once the window listens.
     pub hook_problem: Mutex<Option<String>>,
     /// One turn change at a time: hooks arrive on their own thread, typing on the window's.
@@ -135,6 +138,7 @@ impl AppState {
             pending_open_folders: Mutex::default(),
             last_status_refresh: AtomicI64::new(0),
             unsaved: Mutex::default(),
+            visible: Mutex::default(),
             hook_problem: Mutex::default(),
             turn_lock: Mutex::default(),
             flush_lock: Mutex::default(),

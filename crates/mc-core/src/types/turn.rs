@@ -148,4 +148,6 @@ pub enum TabMark {
     Failed,
     Limit,
     Ended,
+    /// The tab sleeps: no process, woken by a click or a key.
+    Asleep,
 }

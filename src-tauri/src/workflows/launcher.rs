@@ -301,6 +301,8 @@ mod tests {
                 turn: None,
                 moving: false,
                 arrived: None,
+                keep_awake: false,
+                slept_at: None,
             }
         }
 

@@ -16,6 +16,13 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key('Tab', 'Tab', 'ctrl+shift'))).toEqual({ type: 'prev' })
   })
 
+  it('puts the active tab to sleep or wakes it with Ctrl+Shift+Z, leaving Ctrl+Z to the terminal', () => {
+    expect(matchShortcut(key('Z', 'KeyZ', 'ctrl+shift'))).toEqual({ type: 'sleep' })
+    // suspend in a shell, and Claude Code's own use of it
+    expect(matchShortcut(key('z', 'KeyZ', 'ctrl'))).toBeNull()
+    expect(matchShortcut(key('Z', 'KeyZ', 'ctrl+alt+shift'))).toBeNull()
+  })
+
   it('leaves the keys Claude Code uses to the terminal', () => {
     for (const [k, code] of [['t', 'KeyT'], ['w', 'KeyW'], ['b', 'KeyB'], ['f', 'KeyF'], ['d', 'KeyD'], ['c', 'KeyC'], ['v', 'KeyV']]) {
       expect(matchShortcut(key(k, code, 'ctrl'))).toBeNull()

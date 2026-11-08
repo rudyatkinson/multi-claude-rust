@@ -207,6 +207,9 @@ pub enum SessionKind {
 pub enum SessionStatus {
     Running,
     Exited,
+    /// The tab keeps its place, its name, its output and its conversation, but runs no process;
+    /// it starts again (`claude --resume`) when it is woken.
+    Sleeping,
 }
 
 /// How a conversation came to the account of its tab, when a usage limit made it move there.
@@ -265,6 +268,12 @@ pub struct SessionInfo {
     pub moving: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrived: Option<Arrival>,
+    /// Never put to sleep for being idle (`keepAwake?: true`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keep_awake: bool,
+    /// When the session went to sleep; set while it is [`SessionStatus::Sleeping`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slept_at: Option<i64>,
 }
 
 /// `last` continues the folder's most recent conversation; `pick` opens Claude Code's conversation list.
@@ -356,8 +365,28 @@ pub struct AppSettings {
     /// Look for a new version at start and once a day. On unless set to false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_updates: Option<bool>,
+    /// Minutes without activity after which a Claude tab is put to sleep; 0 never, missing
+    /// [`SLEEP_IDLE_MINUTES`]`.default`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sleep_idle_minutes: Option<u32>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// Limits of `sleepIdleMinutes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SleepIdleLimits {
+    pub max: u32,
+    pub default: u32,
+}
+
+pub const SLEEP_IDLE_MINUTES: SleepIdleLimits = SleepIdleLimits { max: 1440, default: 15 };
+
+impl AppSettings {
+    /// `sleepIdleMinutes` as it is used: the default when missing, 0 for never.
+    pub fn sleep_after_minutes(&self) -> u32 {
+        self.sleep_idle_minutes.unwrap_or(SLEEP_IDLE_MINUTES.default).min(SLEEP_IDLE_MINUTES.max)
+    }
 }
 
 /// `AppSettings.tabStrip`.
@@ -385,6 +414,7 @@ impl Default for AppSettings {
             skill_folders: None,
             tab_strip: None,
             check_updates: None,
+            sleep_idle_minutes: None,
             extra: Extra::new(),
         }
     }
@@ -405,6 +435,7 @@ pub struct SettingsPatch {
     pub open_at_login: Option<bool>,
     pub tab_strip: Option<TabStrip>,
     pub check_updates: Option<bool>,
+    pub sleep_idle_minutes: Option<u32>,
 }
 
 impl SettingsPatch {
@@ -418,6 +449,9 @@ impl SettingsPatch {
         }
         if let Some(strip) = self.tab_strip {
             settings.tab_strip = Some(strip);
+        }
+        if let Some(minutes) = self.sleep_idle_minutes {
+            settings.sleep_idle_minutes = Some(minutes);
         }
         let flags = [
             (self.restore_tabs, &mut settings.restore_tabs),

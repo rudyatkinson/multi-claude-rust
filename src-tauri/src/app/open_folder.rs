@@ -9,6 +9,7 @@ use mc_core::types::{OpenFolder, ResumeConversation, SessionKind, SessionRequest
 use crate::app::launch::plan_session;
 use crate::app::notice;
 use crate::events::{self, NoticeLevel};
+use crate::sessions::{new_session_id, SleepingTab};
 use crate::state::{is, lock, AppState};
 use crate::tab_store::{plan_restore_on_disk, restored_layout};
 
@@ -40,7 +41,8 @@ pub fn flush_pending(state: &AppState) {
 }
 
 /// `restoreTabs`: reopens the tabs of the last run. Each continues its conversation, or starts
-/// fresh if it never had one; all are announced at once, with the arrangement they belong in.
+/// fresh if it never had one; a tab that was asleep comes back asleep, without a process. All are
+/// announced at once, with the arrangement they belong in.
 ///
 /// From the first session started until that announcement, what the window reports of its
 /// layout is ignored (`ui:layout`, see [`Flags::restoring_layout`](crate::state::Flags)): it is
@@ -74,6 +76,19 @@ fn restore_tabs(state: &AppState) {
                 launch: None,
                 prompt: None,
             };
+            if tab.asleep {
+                // it was asleep: it comes back asleep, and starts only when it is woken
+                let info = state.sessions.create_sleeping(SleepingTab {
+                    id: new_session_id(),
+                    profile_id: request.profile_id.clone(),
+                    cwd: request.cwd.clone(),
+                    name: request.name.clone(),
+                    claude_session_id: tab.resume.as_ref().map(|r| r.id.clone()),
+                    transcript_path: tab.transcript_path.clone(),
+                    request: SessionRequest { resume: None, ..request },
+                });
+                return Some(info.id);
+            }
             match plan_session(state, &request).and_then(|plan| state.sessions.start(plan)) {
                 Ok(info) => Some(info.id),
                 Err(e) => {

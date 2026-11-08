@@ -237,6 +237,8 @@ fn read_entry(entry: &Value) -> Option<SavedEntry> {
         claude_session_id: text(entry.get("claudeSessionId")),
         transcript_path: text(entry.get("transcriptPath")),
         name: text(entry.get("name")),
+        // only a real `true`
+        asleep: entry.get("asleep").and_then(Value::as_bool) == Some(true),
     }))
 }
 
@@ -336,6 +338,18 @@ pub fn has_transcript(config_dir: &Path, claude_session_id: Option<&str>, transc
     dirs.flatten().any(|dir| dir.path().join(&file).exists())
 }
 
+/// Whether Claude Code has a conversation of the folder `cwd` on disk, which `claude -c` would
+/// continue: a `.jsonl` file in `<config>/projects/<folder key>`, the key matched without regard
+/// to case (Windows writes the drive letter either way).
+pub fn folder_has_conversation(config_dir: &Path, cwd: &str) -> bool {
+    let key = mc_core::memory::sanitize_path(cwd).to_lowercase();
+    let Ok(dirs) = std::fs::read_dir(config_dir.join("projects")) else { return false };
+    dirs.flatten().filter(|dir| dir.file_name().to_string_lossy().to_lowercase() == key).any(|dir| {
+        std::fs::read_dir(dir.path())
+            .is_ok_and(|files| files.flatten().any(|f| f.path().extension().is_some_and(|e| e == "jsonl") && f.path().is_file()))
+    })
+}
+
 /// Whether a saved tab's folder is still there.
 pub fn folder_exists(cwd: &str) -> bool {
     std::fs::metadata(cwd).is_ok_and(|m| m.is_dir())
@@ -343,6 +357,8 @@ pub fn folder_exists(cwd: &str) -> bool {
 
 /// `planRestore`: which sessions to start for the saved tabs. Tabs whose account or folder is gone
 /// are dropped; a tab resumes its conversation when that exists on disk, else it starts fresh.
+/// A tab that was asleep comes back asleep (nothing is started for it) when its conversation
+/// exists on disk, and is dropped when it does not: there is nothing for it to wake into.
 /// Panels need nothing started: they are kept, each once, and come after the sessions in the
 /// plan's layout (see [`RestorePlan`]).
 pub fn plan_restore(
@@ -369,13 +385,23 @@ pub fn plan_restore(
         if !profile_exists(&tab.profile_id) || !folder_exists(&tab.cwd) {
             continue;
         }
-        moved.insert(index as i64, Ok(requests.len()));
         let resume = tab
             .claude_session_id
             .as_ref()
             .filter(|id| !id.is_empty() && has_transcript(tab))
             .map(|id| ResumeConversation { id: id.clone() });
-        requests.push(RestoreRequest { profile_id: tab.profile_id.clone(), cwd: tab.cwd.clone(), resume, name: tab.name.clone() });
+        if tab.asleep && resume.is_none() {
+            continue;
+        }
+        moved.insert(index as i64, Ok(requests.len()));
+        requests.push(RestoreRequest {
+            profile_id: tab.profile_id.clone(),
+            cwd: tab.cwd.clone(),
+            resume,
+            name: tab.name.clone(),
+            asleep: tab.asleep,
+            transcript_path: tab.asleep.then(|| tab.transcript_path.clone()).flatten(),
+        });
     }
     let sessions = requests.len();
     let position = |index: i64| moved.get(&index).map(|at| at.map_or_else(|panel| sessions + panel, |request| request) as i64);
@@ -414,7 +440,7 @@ mod tests {
     use serde_json::json;
 
     fn tab(profile_id: &str, cwd: &str) -> SavedTab {
-        SavedTab { profile_id: profile_id.into(), cwd: cwd.into(), claude_session_id: None, transcript_path: None, name: None }
+        SavedTab { profile_id: profile_id.into(), cwd: cwd.into(), claude_session_id: None, transcript_path: None, name: None, asleep: false }
     }
 
     fn with_id(profile_id: &str, cwd: &str, id: &str) -> SavedTab {
@@ -602,6 +628,35 @@ mod tests {
             assert!(!has_transcript(dir.path(), None, None));
             assert!(!has_transcript(&dir.path().join("no-such-config"), Some("id-2"), None));
         }
+
+        #[test]
+        fn knows_whether_a_folder_has_a_conversation_to_continue() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(!folder_has_conversation(dir.path(), r"C:\code\app"));
+            let project = dir.path().join("projects").join("c--code-app");
+            std::fs::create_dir_all(project.join("memory")).unwrap();
+            // a memory folder is not a conversation
+            assert!(!folder_has_conversation(dir.path(), r"C:\code\app"));
+            std::fs::write(project.join("id-1.jsonl"), "").unwrap();
+            // the drive letter may be written either way
+            assert!(folder_has_conversation(dir.path(), r"C:\code\app"));
+            assert!(!folder_has_conversation(dir.path(), r"C:\code\other"));
+        }
+
+        #[test]
+        fn remembers_which_tabs_were_asleep() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("tabs.json");
+            let asleep = SavedTab { asleep: true, ..with_id("main", r"C:\a", "id-1") };
+            save_tabs(&file, &SavedTabs { tabs: entries([asleep.clone(), tab("main", r"C:\b")]), active: 0, layout: None }).unwrap();
+            let raw: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(raw["tabs"][0]["asleep"], json!(true));
+            assert!(raw["tabs"][1].get("asleep").is_none());
+            assert_eq!(load_tabs(&file).tabs, entries([asleep, tab("main", r"C:\b")]));
+            // only a real true counts
+            write_raw(&file, json!({ "tabs": [{ "profileId": "main", "cwd": r"C:\a", "asleep": "yes" }], "active": 0 }));
+            assert!(!load_tabs(&file).tabs[0].session().unwrap().asleep);
+        }
     }
 
     mod planning_a_restore {
@@ -640,6 +695,37 @@ mod tests {
             // opened but never used: no conversation was written, so it starts fresh
             assert_eq!(plan.requests[1].resume, None);
             assert_eq!(plan.requests[2].resume, None);
+            assert!(plan.requests.iter().all(|r| !r.asleep && r.transcript_path.is_none()));
+        }
+
+        #[test]
+        fn keeps_asleep_tabs_asleep_and_drops_those_without_a_conversation() {
+            let asleep = |tab: SavedTab| SavedTab { asleep: true, ..tab };
+            let saved = SavedTabs {
+                tabs: entries([
+                    // asleep, its conversation on disk: it comes back asleep, where it was
+                    asleep(SavedTab { transcript_path: Some(r"C:\t\id-1.jsonl".into()), ..with_id("main", r"C:\a", "id-1") }),
+                    // asleep, never sent a message: nothing to wake into
+                    asleep(tab("main", r"C:\b")),
+                    // asleep with an id that has no conversation on disk
+                    asleep(with_id("main", r"C:\c", "id-9")),
+                    with_id("work", r"C:\d", "id-1"),
+                ]),
+                active: 3,
+                layout: Some(saved_layout(
+                    json!({ "root": { "dir": "row", "ratio": 0.5, "first": { "tabs": [0, 1], "active": 1 }, "second": { "tabs": [2, 3], "active": 3 } }, "focused": 1 }),
+                )),
+            };
+            let plan = plan(&saved);
+            assert_eq!(plan.requests.iter().map(|r| (r.cwd.as_str(), r.asleep)).collect::<Vec<_>>(), [(r"C:\a", true), (r"C:\d", false)]);
+            assert_eq!(plan.requests[0].resume, Some(ResumeConversation { id: "id-1".into() }));
+            assert_eq!(plan.requests[0].transcript_path.as_deref(), Some(r"C:\t\id-1.jsonl"));
+            assert_eq!(plan.requests[1].transcript_path, None);
+            assert_eq!(plan.active, 1);
+            assert_eq!(
+                plan.layout,
+                Some(saved_layout(json!({ "root": { "dir": "row", "ratio": 0.5, "first": { "tabs": [0], "active": 0 }, "second": { "tabs": [1], "active": 1 } }, "focused": 1 })))
+            );
         }
 
         #[test]

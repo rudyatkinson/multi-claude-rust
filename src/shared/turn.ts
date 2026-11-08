@@ -1,3 +1,5 @@
+import { sleepLabel } from './sleep'
+
 /** The API errors a turn can end with, as Claude Code names them in its `StopFailure` hook. */
 export const STOP_ERRORS = [
   'rate_limit',
@@ -127,14 +129,18 @@ export function callsForYou(turn: Turn | undefined): turn is Turn {
   return asks(turn) || turn?.kind === 'failed'
 }
 
-export type TabMark = 'busy' | 'idle' | 'ask' | 'failed' | 'limit' | 'ended'
+export type TabMark = 'busy' | 'idle' | 'ask' | 'failed' | 'limit' | 'ended' | 'asleep'
 
 /**
  * The mark of a tab and what it means. The terminal title says whether Claude is working; the
  * turn says why it is not. Without a turn the title is all there is, as it was before tabs had
- * hooks.
+ * hooks. A sleeping tab says since when it sleeps, whatever its title said last.
  */
-export function tabMark(o: { exited: boolean; turn?: Turn; busy: boolean; busySince?: number }): { state: TabMark; label: string } {
+export function tabMark(o: { exited: boolean; asleep?: boolean; sleptAt?: number; turn?: Turn; busy: boolean; busySince?: number }): {
+  state: TabMark
+  label: string
+} {
+  if (o.asleep) return { state: 'asleep', label: sleepLabel(o.sleptAt) }
   if (o.exited) return { state: 'ended', label: 'Ended' }
   const { turn } = o
   const working = { state: 'busy' as const, label: 'Working' }

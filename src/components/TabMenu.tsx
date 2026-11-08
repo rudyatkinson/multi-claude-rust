@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode }
 import type { SessionInfo } from '@shared/types'
 import { pinnedAccount } from '@shared/folders'
 import { groupOf, groupsOf, panelKindOf, panelTabId, type PanelKind } from '@shared/layout'
+import { canSleep } from '@shared/sleep'
 import {
   closePanel,
   closeSession,
@@ -11,10 +12,13 @@ import {
   mergeAreas,
   revealFolder,
   setFolderAccount,
+  setKeepAwake,
   setModal,
+  sleepSession,
   splitTab,
   startRename,
-  useStore
+  useStore,
+  wakeSession
 } from '../store'
 
 const MARGIN = 6
@@ -36,17 +40,29 @@ export function TabMenu() {
   )
 }
 
-function Item({ label, action, danger, disabled }: { label: string; action: () => unknown; danger?: boolean; disabled?: boolean }) {
+interface ItemProps {
+  label: string
+  action: () => unknown
+  danger?: boolean
+  disabled?: boolean
+  /** A setting that is on or off: shown with a check mark while it is on. */
+  checked?: boolean
+}
+
+function Item({ label, action, danger, disabled, checked }: ItemProps) {
+  const toggle = checked !== undefined
   return (
     <button
       className={`menu-item${danger ? ' danger' : ''}`}
       disabled={disabled}
+      role={toggle ? 'menuitemcheckbox' : undefined}
+      aria-checked={toggle ? checked : undefined}
       onClick={() => {
         closeTabMenu()
         void action()
       }}
     >
-      {label}
+      {checked ? `✓ ${label}` : label}
     </button>
   )
 }
@@ -145,7 +161,7 @@ function SessionItems({ session }: { session: SessionInfo }) {
   return (
     <>
       {isClaude && <Item label="Rename…" action={() => startRename(session.id)} />}
-      {isClaude && <Item label="Duplicate" action={() => duplicateSession(session.id)} disabled={session.status !== 'running'} />}
+      {isClaude && <Item label="Duplicate" action={() => duplicateSession(session.id)} disabled={session.status === 'exited'} />}
       <AreaItems id={session.id} />
       {isClaude && <Item label="Continue on another account…" action={() => setModal({ type: 'transfer', sessionId: session.id })} disabled={!otherAccounts} />}
       {isClaude && <Item label={platform === 'win32' ? 'Open folder in Explorer' : 'Open folder'} action={() => revealFolder(session.id)} />}
@@ -155,6 +171,10 @@ function SessionItems({ session }: { session: SessionInfo }) {
           action={() => setFolderAccount(session.cwd, pinned ? null : account.id)}
         />
       )}
+      {isClaude && <div className="menu-sep" />}
+      {isClaude && session.status === 'running' && <Item label="Sleep now" action={() => sleepSession(session.id)} disabled={!canSleep(session)} />}
+      {isClaude && session.status === 'sleeping' && <Item label="Wake" action={() => wakeSession(session.id)} />}
+      {isClaude && <Item label="Keep awake" checked={session.keepAwake === true} action={() => setKeepAwake(session.id, session.keepAwake !== true)} />}
       <div className="menu-sep" />
       <Item label="Close" action={() => closeSession(session.id)} />
       <Item label="Close others" action={() => closeTabsAmong(others)} disabled={others.length === 0} />

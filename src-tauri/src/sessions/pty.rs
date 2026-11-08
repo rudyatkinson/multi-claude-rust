@@ -27,10 +27,12 @@ pub(crate) struct Opened {
     writer: Box<dyn Write + Send>,
 }
 
-/// Starts `program` in a new pty of [`COLS`] x [`ROWS`], in `cwd`, with exactly `env`.
-pub(crate) fn open(program: &str, args: &[String], cwd: &str, env: &BTreeMap<String, String>) -> Result<Opened, String> {
+/// Starts `program` in a new pty of `size` (columns, rows; [`COLS`] x [`ROWS`] without one), in
+/// `cwd`, with exactly `env`.
+pub(crate) fn open(program: &str, args: &[String], cwd: &str, env: &BTreeMap<String, String>, size: Option<(u16, u16)>) -> Result<Opened, String> {
+    let (cols, rows) = size.unwrap_or((COLS, ROWS));
     let pair = native_pty_system()
-        .openpty(PtySize { rows: ROWS, cols: COLS, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("Could not open a terminal: {e}"))?;
     let mut cmd = CommandBuilder::new(program);
     cmd.args(args);

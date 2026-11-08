@@ -11,6 +11,11 @@
 //! the reactions are handlers set once at startup: [`SessionManager::set_changed_handler`] (the
 //! work `emitSessions` did besides sending), [`SessionManager::set_exit_handler`] (`onExit`) and
 //! [`SessionManager::set_cleanup_handler`] (`cleanupSettings`).
+//!
+//! A Claude session can also sleep ([`SessionManager::sleep`]): its process ends, but the session
+//! stays in the list under its id, as [`SessionStatus::Sleeping`], with its output, name and
+//! conversation. [`SessionManager::wake`] starts a new process under the same id; its output
+//! continues the old replay and `seq`, so the window keeps the tab and its terminal.
 
 mod output;
 mod pty;
@@ -28,6 +33,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mc_core::claude_args::claude_args_with;
 use mc_core::error::{AppError, AppResult};
+use mc_core::terminal_input::is_typing;
 use mc_core::types::{
     Arrival, AttachResult, HookNeed, LaunchOptions, Layout, Place, PtyData, SavedTab, SessionInfo, SessionKind, SessionRequest,
     SessionStatus, SessionsChanged, Turn,
@@ -163,6 +169,47 @@ struct Live {
     exited: watch::Receiver<bool>,
     /// `place` and `replaces`, for the one list that introduces the session.
     intro: Option<(Option<Place>, Option<String>)>,
+    /// When something was last typed or pasted into the tab (ms since the epoch); its start before that.
+    last_input_at: i64,
+    /// The size the window last gave the terminal (columns, rows), for a process started in it later.
+    size: Option<(u16, u16)>,
+    /// The process was told to end so that the session sleeps: its end makes it
+    /// [`SessionStatus::Sleeping`] instead of [`SessionStatus::Exited`].
+    to_sleep: bool,
+}
+
+/// A process started in a pty for a session, with its threads, before its waiter runs.
+struct Launched {
+    pty: Pty,
+    child: Box<dyn Child + Send + Sync>,
+    stream: Arc<Stream>,
+    exited_tx: watch::Sender<bool>,
+    exited_rx: watch::Receiver<bool>,
+}
+
+/// A tab that comes back asleep from the last run ([`SessionManager::create_sleeping`]): nothing
+/// is started for it until it is woken.
+#[derive(Debug, Clone)]
+pub struct SleepingTab {
+    /// The new session's id.
+    pub id: String,
+    pub profile_id: String,
+    pub cwd: String,
+    pub name: Option<String>,
+    pub claude_session_id: Option<String>,
+    pub transcript_path: Option<String>,
+    /// What it is started as when it wakes; its `resume` is decided then.
+    pub request: SessionRequest,
+}
+
+/// What the idle check reads of a session (see `crate::sleep`).
+#[derive(Debug, Clone)]
+pub struct Activity {
+    pub info: SessionInfo,
+    /// When something was last typed or pasted into it; its start before that.
+    pub last_input_at: i64,
+    /// When it last printed something; its start before that.
+    pub last_output_at: i64,
 }
 
 impl Live {
@@ -253,6 +300,11 @@ fn now_ms() -> i64 {
 /// A new session id.
 pub fn new_session_id() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+/// What a session's threads are named after: the start of its id.
+fn tag_of(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 /// `fs.statSync(cwd).isDirectory()`, worded as the Electron version worded it.
@@ -373,8 +425,20 @@ impl SessionManager {
         env: BTreeMap<String, String>,
         prepare_settings: impl FnOnce(&str, HookNeed) -> AppResult<Option<PathBuf>>,
     ) -> AppResult<SpawnPlan> {
+        self.plan_as(new_session_id(), request, claude, email_hint, env, prepare_settings)
+    }
+
+    /// [`Self::plan`] for a session of a given id: one that wakes from its sleep keeps its own.
+    pub fn plan_as(
+        &self,
+        id: String,
+        request: &SessionRequest,
+        claude: &str,
+        email_hint: Option<&str>,
+        env: BTreeMap<String, String>,
+        prepare_settings: impl FnOnce(&str, HookNeed) -> AppResult<Option<PathBuf>>,
+    ) -> AppResult<SpawnPlan> {
         check_folder(&request.cwd)?;
-        let id = new_session_id();
         let (args, claude_session_id) = match request.kind {
             SessionKind::Login => {
                 let mut args: Vec<String> = ["auth", "login", "--claudeai"].map(str::to_owned).to_vec();
@@ -482,17 +546,57 @@ impl SessionManager {
         result
     }
 
+    /// Starts `program` in a pty for the session `id`, with its writer, reader and flusher
+    /// threads. Its output follows the one of `before` when given (a session woken from its sleep).
+    #[allow(clippy::too_many_arguments)]
+    fn launch(
+        &self,
+        id: &str,
+        program: &str,
+        args: &[String],
+        cwd: &str,
+        env: &BTreeMap<String, String>,
+        size: Option<(u16, u16)>,
+        before: Option<&Stream>,
+    ) -> AppResult<Launched> {
+        let opened = pty::open(program, args, cwd, env, size).map_err(AppError::io)?;
+        let outlet = self.inner.outlet.clone();
+        let stream = match before {
+            Some(before) => Stream::following(id.to_owned(), outlet, before),
+            None => Stream::new(id.to_owned(), outlet),
+        };
+        let started = pty::start(opened, stream.clone(), &tag_of(id)).map_err(AppError::io)?;
+        let pty::Started { master, child, killer, input } = started;
+        let (exited_tx, exited_rx) = watch::channel(false);
+        Ok(Launched { pty: Pty { master: Some(Box::new(master)), input, killer }, child, stream, exited_tx, exited_rx })
+    }
+
+    /// The thread that waits for a launched process to end. It goes last: the session must be in
+    /// the list when its process ends.
+    fn start_waiter(
+        &self,
+        id: &str,
+        profile_id: &str,
+        stream: Arc<Stream>,
+        child: Box<dyn Child + Send + Sync>,
+        exited: watch::Sender<bool>,
+    ) -> std::io::Result<()> {
+        let manager = self.clone();
+        let (wait_id, wait_profile) = (id.to_owned(), profile_id.to_owned());
+        pty::thread(format!("pty-wait-{}", tag_of(id)), move || {
+            manager.wait_exit(&wait_id, &wait_profile, &stream, child, exited);
+        })
+    }
+
     fn spawn_inner(&self, plan: SpawnPlan, replacing: Option<&str>) -> AppResult<(SessionInfo, Option<Live>)> {
         let SpawnPlan { id, profile_id, kind, cwd, program, args, env, title, name, place, replaces, claude_session_id, mut request } = plan;
         request.prompt = None;
-        let opened = pty::open(&program, &args, &cwd, &env).map_err(AppError::io)?;
-        let stream = Stream::new(id.clone(), self.inner.outlet.clone());
-        let tag: String = id.chars().take(8).collect();
-        let started = pty::start(opened, stream.clone(), &tag).map_err(AppError::io)?;
-        let pty::Started { master, child, killer, input } = started;
-        let (exited_tx, exited_rx) = watch::channel(false);
+        // a restarted tab keeps the size its terminal has
+        let size = replacing.and_then(|old| self.table().live.get(old).and_then(|l| l.size));
+        let Launched { pty, child, stream, exited_tx, exited_rx } = self.launch(&id, &program, &args, &cwd, &env, size, None)?;
+        let now = now_ms();
 
-        let info = SessionInfo {
+        let mut info = SessionInfo {
             id: id.clone(),
             profile_id: profile_id.clone(),
             kind,
@@ -500,7 +604,7 @@ impl SessionManager {
             title,
             status: SessionStatus::Running,
             exit_code: None,
-            started_at: now_ms(),
+            started_at: now,
             name: if kind == SessionKind::Claude { name } else { None },
             replaces: None,
             place: None,
@@ -510,19 +614,26 @@ impl SessionManager {
             turn: None,
             moving: false,
             arrived: None,
-        };
-        let live = Live {
-            info: info.clone(),
-            request,
-            transcript_path: None,
-            pty: Some(Pty { master: Some(Box::new(master)), input, killer }),
-            ending: false,
-            stream: stream.clone(),
-            exited: exited_rx,
-            intro: (place.is_some() || replaces.is_some()).then_some((place, replaces)),
+            keep_awake: false,
+            slept_at: None,
         };
         let old = {
             let mut t = self.table();
+            // "Keep awake" stays with the tab through a restart or a move
+            info.keep_awake = replacing.and_then(|old| t.live.get(old)).is_some_and(|l| l.info.keep_awake);
+            let live = Live {
+                info: info.clone(),
+                request,
+                transcript_path: None,
+                pty: Some(pty),
+                ending: false,
+                stream: stream.clone(),
+                exited: exited_rx,
+                intro: (place.is_some() || replaces.is_some()).then_some((place, replaces)),
+                last_input_at: now,
+                size,
+                to_sleep: false,
+            };
             let at = replacing.and_then(|old| t.order.iter().position(|x| x == old));
             match at {
                 Some(i) => t.order.insert(i, id.clone()),
@@ -532,13 +643,7 @@ impl SessionManager {
             replacing.and_then(|old| t.remove(old))
         };
 
-        // the waiter goes last: the session must be in the list when its process ends
-        let manager = self.clone();
-        let waiter_stream = stream;
-        let (wait_id, wait_profile) = (id.clone(), profile_id);
-        let waiting = pty::thread(format!("pty-wait-{tag}"), move || {
-            manager.wait_exit(&wait_id, &wait_profile, &waiter_stream, child, exited_tx);
-        });
+        let waiting = self.start_waiter(&id, &profile_id, stream, child, exited_tx);
         if let Err(e) = waiting {
             let gone = self.table().remove(&id);
             if let Some(gone) = gone {
@@ -554,6 +659,196 @@ impl SessionManager {
             return Err(AppError::io(format!("Could not start the session: {e}")));
         }
         Ok((info, old))
+    }
+
+    // ---------- sleeping ----------
+
+    /// Puts a running Claude session to sleep: its process is asked to end as [`Self::end`] asks
+    /// it (killed after `timeout_ms` at the latest), and the session stays in its tab under its
+    /// id as [`SessionStatus::Sleeping`], with its output, its name, its conversation and its
+    /// launch options. Its settings file and hook address go as they go for any ended process
+    /// (the cleanup handler); the exit handler is not called, since for the user nothing ended.
+    ///
+    /// Until the process is gone the session carries the moving mark (not announced), so that it
+    /// cannot be restarted, moved or woken in between. Refused for anything but a running Claude
+    /// session that is not being moved, restarted or put to sleep already. The returned future
+    /// resolves once the process is gone, or at `timeout_ms`.
+    pub fn sleep(&self, id: &str, timeout_ms: u64) -> AppResult<impl Future<Output = ()> + Send + 'static> {
+        {
+            let mut t = self.table();
+            let live = t.live.get_mut(id).ok_or_else(|| AppError::refused("Session not found"))?;
+            if live.info.kind != SessionKind::Claude || live.info.status != SessionStatus::Running || live.pty.is_none() {
+                return Err(AppError::refused("Only a running Claude tab can be put to sleep."));
+            }
+            if live.info.moving || live.to_sleep {
+                return Err(AppError::refused("This tab is being moved, restarted or put to sleep already."));
+            }
+            live.info.moving = true;
+            live.to_sleep = true;
+        }
+        let ending = self.end(id, timeout_ms);
+        let manager = self.clone();
+        let id = id.to_owned();
+        Ok(async move {
+            ending.await;
+            manager.sleep_requested_done(&id);
+        })
+    }
+
+    /// The end that [`Self::sleep`] asked for is over or timed out. A process that is still there
+    /// sleeps once it ends; until then the mark comes off, so that the tab can be closed or
+    /// restarted as usual.
+    fn sleep_requested_done(&self, id: &str) {
+        let mut t = self.table();
+        if let Some(live) = t.live.get_mut(id).filter(|l| l.to_sleep) {
+            live.info.moving = false;
+        }
+    }
+
+    /// A tab that comes back asleep from the last run: it joins the list as
+    /// [`SessionStatus::Sleeping`] with an empty replay and no process, without being announced
+    /// ([`Self::announce`] does that, as after [`Self::start`]).
+    pub fn create_sleeping(&self, tab: SleepingTab) -> SessionInfo {
+        let SleepingTab { id, profile_id, cwd, name, claude_session_id, transcript_path, mut request } = tab;
+        request.prompt = None;
+        let now = now_ms();
+        let info = SessionInfo {
+            id: id.clone(),
+            profile_id,
+            kind: SessionKind::Claude,
+            title: title_of(&cwd),
+            cwd,
+            status: SessionStatus::Sleeping,
+            exit_code: None,
+            started_at: now,
+            name,
+            replaces: None,
+            place: None,
+            claude_session_id,
+            model: None,
+            context_pct: None,
+            turn: None,
+            moving: false,
+            arrived: None,
+            keep_awake: false,
+            slept_at: Some(now),
+        };
+        // nothing will ever run in it: its end has come already
+        let (_tx, exited) = watch::channel(true);
+        let live = Live {
+            info: info.clone(),
+            request,
+            transcript_path,
+            pty: None,
+            ending: false,
+            stream: Stream::new(id.clone(), self.inner.outlet.clone()),
+            exited,
+            intro: None,
+            last_input_at: now,
+            size: None,
+            to_sleep: false,
+        };
+        let mut t = self.table();
+        if t.live.insert(id.clone(), live).is_none() {
+            t.order.push(id);
+        }
+        info
+    }
+
+    /// Starts a sleeping session again, under its own id: `plan` was made for it with
+    /// [`Self::plan_as`]. The new process gets the size the terminal last had, and its output
+    /// continues the replay and `seq` of the old one, so the window keeps the tab, its terminal
+    /// and what it shows. Its name and launch options are the plan's (which keeps those of the
+    /// session). On failure the session stays asleep and the plan's files are cleaned up.
+    pub fn wake(&self, plan: SpawnPlan) -> AppResult<SessionInfo> {
+        let (profile_id, id) = (plan.profile_id.clone(), plan.id.clone());
+        match self.wake_inner(plan) {
+            Ok(info) => {
+                self.emit_changed(None);
+                Ok(info)
+            }
+            Err(e) => {
+                self.cleanup(&profile_id, &id);
+                Err(e)
+            }
+        }
+    }
+
+    fn wake_inner(&self, plan: SpawnPlan) -> AppResult<SessionInfo> {
+        let SpawnPlan { id, profile_id, cwd, program, args, env, title, name, claude_session_id, mut request, .. } = plan;
+        request.prompt = None;
+        let asleep = |l: &Live| l.info.status == SessionStatus::Sleeping && l.info.profile_id == profile_id;
+        let (before, size) = {
+            let t = self.table();
+            let live = t.live.get(&id).ok_or_else(|| AppError::refused("Session not found"))?;
+            if !asleep(live) {
+                return Err(AppError::refused("This tab is not asleep."));
+            }
+            (live.stream.clone(), live.size)
+        };
+        let Launched { pty, child, stream, exited_tx, exited_rx } = self.launch(&id, &program, &args, &cwd, &env, size, Some(&before))?;
+        let now = now_ms();
+        let taken = {
+            let mut t = self.table();
+            match t.live.get_mut(&id).filter(|l| asleep(l)) {
+                // closed while the process started
+                None => Err(pty),
+                Some(live) => {
+                    live.request = request;
+                    live.pty = Some(pty);
+                    live.ending = false;
+                    live.to_sleep = false;
+                    live.stream = stream.clone();
+                    live.exited = exited_rx;
+                    live.last_input_at = now;
+                    // another conversation than the one it slept in (a new one, or the folder's last)
+                    if claude_session_id.is_some() && claude_session_id != live.info.claude_session_id {
+                        live.transcript_path = None;
+                        live.info.claude_session_id = claude_session_id;
+                    }
+                    let info = &mut live.info;
+                    info.status = SessionStatus::Running;
+                    info.exit_code = None;
+                    info.started_at = now;
+                    info.slept_at = None;
+                    info.turn = None;
+                    // the mark of whoever woke it: it is awake now, and the list says so
+                    info.moving = false;
+                    info.title = title;
+                    info.name = name;
+                    info.cwd = cwd;
+                    Ok(info.clone())
+                }
+            }
+        };
+        let info = match taken {
+            Ok(info) => info,
+            Err(mut pty) => {
+                stream.close();
+                let _ = pty.killer.kill();
+                close_later(pty.master.take());
+                return Err(AppError::refused("Session not found"));
+            }
+        };
+        if let Err(e) = self.start_waiter(&id, &profile_id, stream.clone(), child, exited_tx) {
+            // back to sleep, with the output it had
+            let pty = {
+                let mut t = self.table();
+                t.live.get_mut(&id).filter(|l| Arc::ptr_eq(&l.stream, &stream)).and_then(|live| {
+                    live.stream = before;
+                    live.info.status = SessionStatus::Sleeping;
+                    live.info.slept_at = Some(now_ms());
+                    live.pty.take()
+                })
+            };
+            stream.close();
+            if let Some(mut pty) = pty {
+                let _ = pty.killer.kill();
+                close_later(pty.master.take());
+            }
+            return Err(AppError::io(format!("Could not start the session: {e}")));
+        }
+        Ok(info)
     }
 
     /// The waiter thread: the process ended. Its output is let through to the end, then the
@@ -585,19 +880,29 @@ impl SessionManager {
         live.pty.as_mut()?.master.take()
     }
 
+    /// The process of a session is gone: it is marked as ended, or as asleep when [`Self::sleep`]
+    /// ended it. A session that falls asleep keeps the moving mark until its files are cleaned up,
+    /// so that waking it (which makes them anew under the same id) cannot come in between.
     fn finish_exit(&self, id: &str, profile_id: &str, stream: &Arc<Stream>, code: Option<i64>) {
         stream.flush();
-        let (info, pty) = {
+        let mine = |l: &&mut Live| Arc::ptr_eq(&l.stream, stream);
+        let (mut info, pty, asleep) = {
             let mut t = self.table();
-            match t.live.get_mut(id).filter(|l| Arc::ptr_eq(&l.stream, stream)) {
+            match t.live.get_mut(id).filter(mine) {
                 // closing the tab caused the exit and already removed the session
-                None => (None, None),
+                None => (None, None, false),
                 Some(live) => {
                     let pty = live.pty.take();
-                    live.info.status = SessionStatus::Exited;
-                    live.info.exit_code = code;
+                    let asleep = std::mem::take(&mut live.to_sleep);
+                    if asleep {
+                        live.info.status = SessionStatus::Sleeping;
+                        live.info.slept_at = Some(now_ms());
+                    } else {
+                        live.info.status = SessionStatus::Exited;
+                        live.info.exit_code = code;
+                    }
                     live.info.turn = None;
-                    (Some(live.info.clone()), pty)
+                    (Some(live.info.clone()), pty, asleep)
                 }
             }
         };
@@ -605,8 +910,19 @@ impl SessionManager {
             close_later(pty.master.take());
         }
         self.cleanup(profile_id, id);
+        if asleep {
+            let mut t = self.table();
+            info = t.live.get_mut(id).filter(mine).map(|live| {
+                live.info.moving = false;
+                live.info.clone()
+            });
+        }
         let Some(info) = info else { return };
         self.emit_changed(None);
+        if asleep {
+            log::info!("session {} is asleep", tag_of(id));
+            return;
+        }
         let handler = self.handlers().exit.clone();
         if let Some(on_exit) = handler {
             on_exit(info);
@@ -626,23 +942,33 @@ impl SessionManager {
         Some(AttachResult { info, replay, seq })
     }
 
-    /// Writes to the session's terminal; false when it has no running process.
+    /// Writes to the session's terminal; false when it has no running process (an ended or a
+    /// sleeping session). What a person typed or pasted, as opposed to the terminal's own reports,
+    /// counts as activity for the idle check.
     pub fn write(&self, id: &str, data: &str) -> bool {
         if data.is_empty() {
             return false;
         }
-        let t = self.table();
-        t.live.get(id).and_then(|l| l.pty.as_ref()).is_some_and(|p| p.input.send(data.as_bytes().to_vec()).is_ok())
+        let mut t = self.table();
+        let Some(live) = t.live.get_mut(id) else { return false };
+        let sent = live.pty.as_ref().is_some_and(|p| p.input.send(data.as_bytes().to_vec()).is_ok());
+        if sent && is_typing(data) {
+            live.last_input_at = now_ms();
+        }
+        sent
     }
 
-    /// Resizes the session's terminal; a size outside 2..=1000 either way is ignored.
+    /// Resizes the session's terminal; a size outside 2..=1000 either way is ignored. The size is
+    /// kept for a process that starts in the terminal later (a sleeping session that wakes).
     pub fn resize(&self, id: &str, cols: u16, rows: u16) {
         let range = PTY_MIN..=PTY_MAX;
         if !range.contains(&cols) || !range.contains(&rows) {
             return;
         }
-        let t = self.table();
-        if let Some(master) = t.live.get(id).and_then(|l| l.pty.as_ref()).and_then(|p| p.master.as_ref()) {
+        let mut t = self.table();
+        let Some(live) = t.live.get_mut(id) else { return };
+        live.size = Some((cols, rows));
+        if let Some(master) = live.pty.as_ref().and_then(|p| p.master.as_ref()) {
             if let Err(e) = master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }) {
                 // the process exited between the check and the resize
                 log::debug!("resize {id}: {e}");
@@ -742,14 +1068,17 @@ impl SessionManager {
     }
 
     /// `remove` after the session left the list: no more output, the process told to end, the
-    /// pty closed, the settings cleaned up.
+    /// pty closed, the settings cleaned up. A sleeping session let go of its files when it fell
+    /// asleep (a wake on its way cleans up after itself when it finds the tab gone).
     fn dispose(&self, mut live: Live) {
         live.stream.close();
         close_later(live.kill());
         if let Some(mut pty) = live.pty.take() {
             close_later(pty.master.take());
         }
-        self.cleanup(&live.info.profile_id, &live.info.id);
+        if live.info.status != SessionStatus::Sleeping {
+            self.cleanup(&live.info.profile_id, &live.info.id);
+        }
     }
 
     /// Names a tab; without a name it shows its automatic title again.
@@ -860,6 +1189,33 @@ impl SessionManager {
         }
     }
 
+    /// The user's "Keep awake": a tab with it is never put to sleep for being idle. Only a Claude
+    /// tab takes it; announced when it changes.
+    pub fn set_keep_awake(&self, id: &str, on: bool) -> AppResult<()> {
+        let changed = {
+            let mut t = self.table();
+            let live = t.live.get_mut(id).ok_or_else(|| AppError::refused("Session not found"))?;
+            if live.info.kind != SessionKind::Claude {
+                return Err(AppError::refused("Only a Claude tab can be kept awake."));
+            }
+            std::mem::replace(&mut live.info.keep_awake, on) != on
+        };
+        if changed {
+            self.emit_changed(None);
+        }
+        Ok(())
+    }
+
+    /// What the idle check needs of every session, in tab order.
+    pub fn activity(&self) -> Vec<Activity> {
+        let t = self.table();
+        t.order
+            .iter()
+            .filter_map(|id| t.live.get(id))
+            .map(|l| Activity { info: l.info.clone(), last_input_at: l.last_input_at, last_output_at: l.stream.last_output_at() })
+            .collect()
+    }
+
     // ---------- the list ----------
 
     /// `announce` / `emitSessions`: sends the list, with `layout` when given (else the changed
@@ -951,13 +1307,14 @@ impl SessionManager {
         self.table().live.get(id).and_then(|l| l.transcript_path.clone())
     }
 
-    /// The running Claude tabs, in order, as they are remembered for the next start.
+    /// The running and the sleeping Claude tabs, in order, as they are remembered for the next
+    /// start; a sleeping one says so (`asleep`).
     pub fn saved_tabs(&self) -> Vec<(String, SavedTab)> {
         let t = self.table();
         t.order
             .iter()
             .filter_map(|id| t.live.get(id))
-            .filter(|l| l.info.kind == SessionKind::Claude && l.info.status == SessionStatus::Running)
+            .filter(|l| l.info.kind == SessionKind::Claude && matches!(l.info.status, SessionStatus::Running | SessionStatus::Sleeping))
             .map(|l| {
                 let tab = SavedTab {
                     profile_id: l.info.profile_id.clone(),
@@ -965,6 +1322,7 @@ impl SessionManager {
                     claude_session_id: l.info.claude_session_id.clone(),
                     transcript_path: l.transcript_path.clone(),
                     name: l.info.name.clone(),
+                    asleep: l.info.status == SessionStatus::Sleeping,
                 };
                 (l.info.id.clone(), tab)
             })

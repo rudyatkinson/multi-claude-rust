@@ -21,6 +21,7 @@ pub mod profiles;
 pub mod session_alerts;
 pub mod sessions;
 pub mod sharing;
+pub mod sleep;
 pub mod tab_store;
 pub mod token_vault;
 pub mod usage;

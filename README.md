@@ -51,7 +51,7 @@ The buttons at the foot of the sidebar collapse or expand it (Ctrl+Shift+B), ope
 
 ## Tabs
 
-A tab shows the conversation's topic as Claude Code names it, with the folder, the account and the model underneath. Until a conversation has a topic, the folder name is the title. The mark on the left is a spinning ring while Claude is working, a dot while it waits for your input, and a hollow ring once the session has ended. Three more marks say why Claude stopped: an amber square when it asks for a permission, asks a question or presents a plan, a red diamond when its turn ended with an API error, and a hollow amber square when a usage limit cut the turn off. Hover the mark to read which it is. The number on the right is how full the conversation's context window is; it turns amber at 60% and red at 85%.
+A tab shows the conversation's topic as Claude Code names it, with the folder, the account and the model underneath. Until a conversation has a topic, the folder name is the title. The mark on the left is a spinning ring while Claude is working, a dot while it waits for your input, a grey crescent while the tab sleeps (see [Sleeping tabs](#sleeping-tabs)), and a hollow ring once the session has ended. Three more marks say why Claude stopped: an amber square when it asks for a permission, asks a question or presents a plan, a red diamond when its turn ended with an API error, and a hollow amber square when a usage limit cut the turn off. Hover the mark to read which it is. The number on the right is how full the conversation's context window is; it turns amber at 60% and red at 85%.
 
 The app knows why Claude stopped through hooks it adds to every session it starts. They post to a port on this computer only and come on top of your own hooks. If hooks are switched off in Claude Code's settings (`disableAllHooks`), or the app cannot open its port, tabs work without them: the mark then only tells working from waiting, as read from the terminal title.
 
@@ -87,6 +87,16 @@ The arrangement is saved with the tabs and comes back when the app restarts.
 ### Workflows and Library tabs
 
 Workflows and the Library each open in a tab of their own, in the area that has the keyboard. Their sidebar button brings the tab to the front, or closes it when it is in front already. Escape (while the keyboard is in it) and Ctrl+Shift+W close it too, without asking: what is typed in the Library stays until it is saved or the app quits. Otherwise it behaves like a session's tab: it can be dragged and split off, Ctrl+Tab reaches it, and it comes back after a restart.
+
+### Sleeping tabs
+
+Every tab runs its own `claude` process, a couple of hundred megabytes each, even when nobody has touched it for an hour. A tab that has been idle for a while therefore goes to sleep: its process ends, but the tab keeps its place, its name, what its terminal last showed and its conversation. The terminal stays on screen, dimmed, with **Sleeping · Wake** in the middle; the mark is a grey crescent, and hovering it says since when the tab sleeps.
+
+- **Waking.** A click anywhere in the terminal, or any key while the keyboard is in it, wakes the tab: Claude starts again in the same tab with its conversation (`claude --resume`), or the folder's last one when the conversation was never written, and the keyboard goes to it. The key that woke it is not typed. Bringing the tab to the front (a click on its tab, Ctrl+Tab) does not wake it, so you can look at what it last showed.
+- **When a tab sleeps.** Settings → **Sessions → Put idle sessions to sleep after … minutes** sets how long a tab has to be idle (15 minutes unless you change it; 0 never). Idle means nothing was typed into it and, once Claude finished its answer, nothing happened since; a tab without hooks also counts what Claude Code prints. A tab never sleeps while Claude works or waits for work it started in the background, while it asks for a permission, asks a question, presents a plan, stopped at a usage limit or with an error, while a workflow run waits for it, while it is being moved to another account, or while you look at it (the tab in front in the area that has the keyboard, with the window in front). Login tabs never sleep.
+- **By hand.** A tab's right-click menu has **Sleep now** and **Wake**, and **Keep awake**, which keeps that tab from ever going to sleep by itself. Ctrl+Shift+Z puts the active tab to sleep or wakes it.
+- A sleeping tab counts as not running: closing it does not ask, the tray and the account cards do not count it, and quitting does not ask because of it. It sends no notifications and shows no limit bar.
+- Tabs that are asleep when the app quits come back asleep the next time it starts, without starting anything. Quitting itself puts nothing to sleep: running tabs end and come back running, as before.
 
 ### Dropping files
 
@@ -143,7 +153,7 @@ The notification says what the session stopped for: it finished its answer, asks
 
 ### Reopening tabs
 
-The open tabs and the areas they are arranged in are saved as they change. The next time the app starts, each tab opens again in its area with the same account and folder and continues its conversation; a tab that never got a message starts a new one. Tabs whose account or folder no longer exists, login tabs and ended sessions are left out. Settings → **Sessions** switches this off.
+The open tabs and the areas they are arranged in are saved as they change. The next time the app starts, each tab opens again in its area with the same account and folder and continues its conversation; a tab that never got a message starts a new one. A tab that was asleep comes back asleep and starts only when it is woken; one that was asleep without ever getting a message is left out. Tabs whose account or folder no longer exists, login tabs and ended sessions are left out too. Settings → **Sessions** switches this off.
 
 ## Workflows
 
@@ -330,6 +340,7 @@ The DLL is written in Rust (`crates/mc-explorer-command`) and kept built in the 
 | F6 / Shift+F6 | Move the keyboard to the next / previous area |
 | Ctrl+Shift+H | Find a past conversation |
 | Ctrl+Shift+F | Find in the terminal |
+| Ctrl+Shift+Z | Put the active tab to sleep, or wake it |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default terminal font; Ctrl+wheel does the same |
 | Ctrl+Shift+B | Collapse or expand the sidebar |
 | Ctrl+S | In the Library: save the file in the editor |
@@ -347,7 +358,7 @@ Every other key goes to Claude Code. Ctrl+- is the one key the app takes that a 
 | `~/.multi-claude/config.json` | Profiles (with whether an account shares the main account's memory), settings, recent folders, folders pinned to an account, project folders added to the Library |
 | `~/.multi-claude/profiles/` | Claude Code folders of the accounts other than the main one |
 | `~/.multi-claude/bin/claude-<name>.cmd` | Launchers that start an account from any terminal (without `.cmd` on macOS) |
-| `~/.multi-claude/tabs.json` | The open tabs and their arrangement, for the next start |
+| `~/.multi-claude/tabs.json` | The open tabs and their arrangement, for the next start; a tab that was asleep carries `"asleep": true` and comes back asleep |
 | `~/.multi-claude/workflows.json` | The designed workflows |
 | `~/.multi-claude/workflow-runs/` | Prompts and outputs of the steps of recent workflow runs |
 | `~/.multi-claude/skill-requests/` | What Claude was asked about a skill, for two weeks |

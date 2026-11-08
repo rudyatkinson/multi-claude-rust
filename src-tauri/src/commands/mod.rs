@@ -87,9 +87,13 @@ registry![
     sessions::sessions_rename,
     sessions::sessions_restart,
     sessions::sessions_reveal_folder,
+    sessions::sessions_sleep,
+    sessions::sessions_wake,
+    sessions::sessions_set_keep_awake,
     sessions::pty_write,
     sessions::pty_resize,
     layout::ui_layout,
+    layout::ui_visible,
     attention::session_attention,
     // mcp
     mcp::mcp_list,

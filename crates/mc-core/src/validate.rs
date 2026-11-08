@@ -19,7 +19,7 @@ use crate::jsstr::{cut16, longer16};
 use crate::types::{
     AgentRef, CreateSessionInput, InstructionRef, InstructionTarget, MemoryCreateInput, MemoryRef, Place, ProfilePatch,
     ResumeMode, SettingsPatch, SkillRef, StartRunInput, TabStrip, TransferMode, FONT_SIZE, INSTRUCTION_LIMITS, MEMORY_LIMITS,
-    WORKFLOW_LIMITS,
+    SLEEP_IDLE_MINUTES, WORKFLOW_LIMITS,
 };
 
 /// The default limit of `str`.
@@ -243,6 +243,15 @@ pub fn font_size(value: f64) -> Option<u32> {
         return None;
     }
     Some(js_round(value).clamp(f64::from(FONT_SIZE.min), f64::from(FONT_SIZE.max)) as u32)
+}
+
+/// `sleepIdleMinutes` of a settings patch: rounded and held within 0 (never) and
+/// [`SLEEP_IDLE_MINUTES`]`.max`; None for a value that is not a finite number.
+pub fn sleep_idle_minutes(value: f64) -> Option<u32> {
+    if !value.is_finite() {
+        return None;
+    }
+    Some(js_round(value).clamp(0.0, f64::from(SLEEP_IDLE_MINUTES.max)) as u32)
 }
 
 /// `workflows:output`: the index of a step, a whole number below the step limit.
@@ -515,6 +524,7 @@ pub fn settings_patch(value: &Value) -> SettingsPatch {
         tray: flag("tray"),
         open_at_login: flag("openAtLogin"),
         check_updates: flag("checkUpdates"),
+        sleep_idle_minutes: p.get("sleepIdleMinutes").and_then(Value::as_f64).and_then(sleep_idle_minutes),
         tab_strip: p.get("tabStrip").and_then(Value::as_str).and_then(|s| match s {
             "top" => Some(TabStrip::Top),
             "side" => Some(TabStrip::Side),
@@ -874,6 +884,7 @@ mod tests {
                 open_at_login: Some(true),
                 tab_strip: Some(TabStrip::Side),
                 check_updates: None,
+                sleep_idle_minutes: None,
             }
         );
         // a claudePath that says nothing clears the setting; a missing one leaves it
@@ -889,5 +900,37 @@ mod tests {
         assert_eq!(settings.font_size, 15);
         assert_eq!(settings.tray, Some(false));
         assert_eq!(settings.restore_tabs, None);
+    }
+
+    #[test]
+    fn sleep_idle_minutes_are_whole_minutes_up_to_a_day() {
+        let minutes = |v: Value| settings_patch(&json!({ "sleepIdleMinutes": v })).sleep_idle_minutes;
+        assert_eq!(minutes(json!(15)), Some(15));
+        assert_eq!(minutes(json!(0)), Some(0));
+        assert_eq!(minutes(json!(1440)), Some(1440));
+        // rounded, as the font size is
+        assert_eq!(minutes(json!(2.5)), Some(3));
+        assert_eq!(minutes(json!(2.49)), Some(2));
+        // held within 0..=1440
+        assert_eq!(minutes(json!(-5)), Some(0));
+        assert_eq!(minutes(json!(99999)), Some(1440));
+        // anything but a number leaves the setting alone
+        assert_eq!(minutes(json!("15")), None);
+        assert_eq!(minutes(json!(null)), None);
+        assert_eq!(minutes(json!(true)), None);
+        assert_eq!(sleep_idle_minutes(f64::NAN), None);
+        assert_eq!(sleep_idle_minutes(f64::INFINITY), None);
+
+        let mut settings = crate::types::AppSettings::default();
+        assert_eq!(settings.sleep_after_minutes(), 15);
+        settings_patch(&json!({ "sleepIdleMinutes": 0 })).apply_to(&mut settings);
+        assert_eq!(settings.sleep_idle_minutes, Some(0));
+        assert_eq!(settings.sleep_after_minutes(), 0);
+        // a patch without it keeps it
+        settings_patch(&json!({ "fontSize": 14 })).apply_to(&mut settings);
+        assert_eq!(settings.sleep_idle_minutes, Some(0));
+        // a value written into the file by hand is held to the limit as well
+        settings.sleep_idle_minutes = Some(5000);
+        assert_eq!(settings.sleep_after_minutes(), 1440);
     }
 }

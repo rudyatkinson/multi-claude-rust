@@ -159,6 +159,13 @@ impl OutputBuffer {
     pub fn seq(&self) -> u64 {
         self.seq
     }
+
+    /// The buffer of a process that takes over from this one in the same tab (a session woken
+    /// from its sleep): the replay and `seq` go on from here, so that the window keeps what it
+    /// shows and takes the new output as what follows it. What waits to be sent is not carried.
+    pub fn carried_over(&self) -> OutputBuffer {
+        OutputBuffer { replay: self.replay.clone(), replay_units: self.replay_units, seq: self.seq, ..OutputBuffer::default() }
+    }
 }
 
 /// Windows only: the cursor position request (`ESC [ 6 n`) a pseudoconsole sends before anything
@@ -387,6 +394,22 @@ mod tests {
         assert_eq!(out.seq(), 10 * (FLUSH_UNITS as u64 + 1));
         // the store itself never grows past twice the limit
         assert!(out.replay_units <= 2 * REPLAY_LIMIT);
+    }
+
+    #[test]
+    fn a_carried_over_buffer_goes_on_where_the_old_one_stopped() {
+        let mut old = OutputBuffer::default();
+        old.push("before 😀".as_bytes());
+        old.take();
+        // half a character and a chunk that was never sent stay behind
+        old.push(b"lost \xe2");
+        let mut next = old.carried_over();
+        assert_eq!(next.replay(), "before 😀");
+        assert_eq!(next.seq(), 9);
+        assert!(!next.has_pending());
+        next.push(b" after");
+        assert_eq!(next.take(), Some((" after".to_owned(), 15)));
+        assert_eq!(next.replay(), "before 😀 after");
     }
 
     #[test]

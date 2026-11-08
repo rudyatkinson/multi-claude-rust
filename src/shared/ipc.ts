@@ -51,6 +51,12 @@ export interface IpcInvoke {
   'sessions:transfer': (id: string, profileId: string) => SessionInfo
   'sessions:restart': (id: string, continueLast: boolean) => SessionInfo
   'sessions:openExternal': (input: CreateSessionInput) => void
+  /** Ends the process of a running Claude tab; the tab stays, asleep, with its output and its conversation. */
+  'sessions:sleep': (id: string) => void
+  /** Starts a sleeping tab's Claude again under the same session id, continuing its conversation. */
+  'sessions:wake': (id: string) => SessionInfo
+  /** A tab kept awake is never put to sleep for being idle. */
+  'sessions:setKeepAwake': (id: string, on: boolean) => void
   'dialog:pickFolder': (defaultPath?: string) => string | null
   /** The folder a dropped path stands for: itself, or the folder of a file. Null when it is neither. */
   'fs:folderFor': (path: string) => string | null
@@ -178,6 +184,11 @@ export interface IpcSend {
   'session:attention': { id: string; title: string }
   /** What has changes that are not saved in the Library, so that quitting can ask. Each item names one draft. */
   'ui:unsaved': { items: string[] }
+  /**
+   * The session the user is looking at: the tab in front in the area that has the keyboard, while
+   * the window has the focus; null for none. It is never put to sleep for being idle.
+   */
+  'ui:visible': { id: string | null }
 }
 
 /** Pushed events (main -> renderer). */
@@ -224,6 +235,9 @@ export const INVOKE_CHANNELS = [
   'sessions:transfer',
   'sessions:restart',
   'sessions:openExternal',
+  'sessions:sleep',
+  'sessions:wake',
+  'sessions:setKeepAwake',
   'dialog:pickFolder',
   'fs:folderFor',
   'conversations:list',
@@ -296,7 +310,7 @@ export const INVOKE_CHANNELS = [
   'updater:dismiss'
 ] as const satisfies readonly (keyof IpcInvoke)[]
 
-export const SEND_CHANNELS = ['pty:write', 'pty:resize', 'ui:layout', 'session:attention', 'ui:unsaved'] as const satisfies readonly (keyof IpcSend)[]
+export const SEND_CHANNELS = ['pty:write', 'pty:resize', 'ui:layout', 'session:attention', 'ui:unsaved', 'ui:visible'] as const satisfies readonly (keyof IpcSend)[]
 
 export const EVENT_CHANNELS = [
   'pty:data',

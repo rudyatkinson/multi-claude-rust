@@ -107,7 +107,15 @@ function useTabViews(group: Group): TabView[] {
     if (!session) return []
     const profile = profiles.find((p) => p.id === session.profileId)
     const status = tabStatus[session.id]
-    const sign = tabMark({ exited: session.status === 'exited', turn: session.turn, busy: status?.busy === true, busySince: status?.busySince })
+    const asleep = session.status === 'sleeping'
+    const sign = tabMark({
+      exited: session.status === 'exited',
+      asleep,
+      sleptAt: session.sleptAt,
+      turn: session.turn,
+      busy: status?.busy === true,
+      busySince: status?.busySince
+    })
     const topic = status?.topic ?? null
     const title = tabLabel(session, topic)
     return [
@@ -117,9 +125,9 @@ function useTabViews(group: Group): TabView[] {
         title,
         // the folder moves to the second line once the tab is called something else
         detail: [title === session.title ? null : session.title, profile?.name, session.model].filter(Boolean).join(' · '),
-        tooltip: [session.name, topic, session.cwd, profile?.name].filter(Boolean).join('\n'),
+        tooltip: [asleep ? sign.label : null, session.name, topic, session.cwd, profile?.name].filter(Boolean).join('\n'),
         accent: profile?.color ?? '#888',
-        classes: [sign.state === 'ended' && 'exited', attention[session.id] && 'attention'].filter((c): c is string => !!c),
+        classes: [sign.state === 'ended' && 'exited', asleep && 'asleep', attention[session.id] && 'attention'].filter((c): c is string => !!c),
         session,
         topic
       }

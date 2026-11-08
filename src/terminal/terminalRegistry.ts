@@ -5,6 +5,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import type { IpcEvents } from '@shared/ipc'
+import { wakesOnKey } from '@shared/sleep'
+import { isTyping } from '@shared/terminalInput'
 import { mc } from '../api'
 
 export interface TerminalOptions {
@@ -36,6 +38,8 @@ interface Entry {
   /** Loaded with the first search in this terminal. */
   search?: SearchAddon
   onSearchResult?: (result: SearchResult) => void
+  /** Set while the session sleeps: what is typed is not sent, the first key wakes it instead. */
+  onWake?: () => void
 }
 
 // xterm instances live outside React so that re-renders never recreate a terminal.
@@ -82,6 +86,15 @@ function copySelection(term: Terminal): void {
 function keyHandler(id: string, term: Terminal, opts: TerminalOptions): (e: KeyboardEvent) => boolean {
   return (e) => {
     const key = e.key.toLowerCase()
+    const wake = entries.get(id)?.onWake
+    // asleep: the first key wakes the session and goes nowhere; copying what it showed, a modifier
+    // on its own (on the way to Ctrl+Tab) and the system's Cmd keys leave it asleep
+    const copying = opts.platform !== 'darwin' && e.ctrlKey && !e.altKey && key === 'c' && (e.shiftKey || term.hasSelection())
+    if (wake && !copying && !e.metaKey) {
+      if (e.type === 'keydown' && wakesOnKey(e.key)) wake()
+      e.preventDefault()
+      return false
+    }
     if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && e.key === 'Enter') {
       // newline without submitting, the sequence Claude Code's terminal setup binds to Shift+Enter
       if (e.type === 'keydown') mc.send('pty:write', { id, data: '\x1b\r' })
@@ -136,12 +149,21 @@ export function mountTerminal(id: string, host: HTMLElement, opts: TerminalOptio
   entries.set(id, entry)
 
   term.attachCustomKeyEventHandler(keyHandler(id, term, opts))
-  term.onData((data) => mc.send('pty:write', { id, data }))
+  term.onData((data) => {
+    // asleep: nothing runs to take it; what a person typed (an input method, say) wakes it, the
+    // terminal's own reports (its focus coming back, for one) do not
+    if (entry.onWake) {
+      if (isTyping(data)) entry.onWake()
+      return
+    }
+    mc.send('pty:write', { id, data })
+  })
   term.onTitleChange((title) => opts.onTitle(title))
   term.onResize(({ cols, rows }) => mc.send('pty:resize', { id, cols, rows }))
   host.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     if (term.hasSelection()) copySelection(term)
+    else if (entry.onWake) entry.onWake()
     else void paste(id, term, opts.platform)
   })
   observer.observe(host)
@@ -186,6 +208,15 @@ export function fitTerminal(id: string): void {
 
 export function focusTerminal(id: string): void {
   entries.get(id)?.term.focus()
+}
+
+/**
+ * Tells a terminal that its session sleeps (`onWake` is what a key or a click in it calls) or is
+ * awake again (null). While it sleeps it keeps what it shows and sends nothing.
+ */
+export function setTerminalAsleep(id: string, onWake: (() => void) | null): void {
+  const entry = entries.get(id)
+  if (entry) entry.onWake = onWake ?? undefined
 }
 
 /**

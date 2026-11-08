@@ -126,7 +126,25 @@ fn session_with_a_turn() {
     assert_eq!(ended.turn.as_ref().unwrap().kind, TurnKind::Done { background: false });
     let wire = serde_json::to_value(&ended).unwrap();
     assert!(wire.get("moving").is_none());
+    assert!(wire.get("keepAwake").is_none());
+    assert!(wire.get("sleptAt").is_none());
     assert_eq!(wire["turn"], json!({ "kind": "done", "at": 5 }));
+
+    // a sleeping tab, kept awake once it is woken
+    let asleep: SessionInfo = round_trip(json!({
+        "id": "s-3",
+        "profileId": "p-work",
+        "kind": "claude",
+        "cwd": "C:\\code\\app",
+        "title": "app",
+        "status": "sleeping",
+        "startedAt": 1,
+        "keepAwake": true,
+        "sleptAt": 1731000002000_i64
+    }));
+    assert_eq!(asleep.status, SessionStatus::Sleeping);
+    assert!(asleep.keep_awake);
+    assert_eq!(asleep.slept_at, Some(1731000002000));
 
     for turn in [
         json!({ "kind": "working", "at": 1 }),
@@ -576,13 +594,16 @@ fn ipc_payloads() {
     let _: NewSession = round_trip(json!({}));
     let _: TransferMode = round_trip(json!("move"));
 
-    assert_eq!(INVOKE_CHANNELS.len(), 90);
-    assert_eq!(SEND_CHANNELS, ["pty:write", "pty:resize", "ui:layout", "session:attention", "ui:unsaved"]);
+    let _: UiVisible = round_trip(json!({ "id": "s-1" }));
+    assert_eq!(serde_json::from_value::<UiVisible>(json!({ "id": null })).unwrap(), UiVisible { id: None });
+
+    assert_eq!(INVOKE_CHANNELS.len(), 93);
+    assert_eq!(SEND_CHANNELS, ["pty:write", "pty:resize", "ui:layout", "session:attention", "ui:unsaved", "ui:visible"]);
     assert_eq!(EVENT_CHANNELS.len(), 13);
     let mut all: Vec<&str> = INVOKE_CHANNELS.iter().chain(&SEND_CHANNELS).chain(&EVENT_CHANNELS).copied().collect();
     all.sort_unstable();
     all.dedup();
-    assert_eq!(all.len(), 90 + 5 + 13, "every channel name is used once");
+    assert_eq!(all.len(), 93 + 6 + 13, "every channel name is used once");
 }
 
 #[test]

@@ -101,7 +101,8 @@ export interface SessionInfo {
   kind: SessionKind
   cwd: string
   title: string
-  status: 'running' | 'exited'
+  /** `sleeping`: the tab keeps its place, output and conversation but runs no process until it is woken. */
+  status: SessionStatus
   exitCode?: number | null
   startedAt: number
   /** The user's own name for the tab. It wins over the conversation's topic. */
@@ -121,10 +122,23 @@ export interface SessionInfo {
   /** On its way to another account: it looks ended for a moment, and must not be restarted or moved again. */
   moving?: true
   arrived?: Arrival
+  /** Never put to sleep for being idle. */
+  keepAwake?: true
+  /** When the session went to sleep (epoch ms), while it sleeps. */
+  sleptAt?: number
 }
+
+export type SessionStatus = 'running' | 'exited' | 'sleeping'
 
 /** Limits of the terminal font size, in px. */
 export const FONT_SIZE = { min: 8, max: 28, default: 13 } as const
+
+/** Minutes without activity after which a Claude tab sleeps: `sleepIdleMinutes`, 0 for never. */
+export const SLEEP_IDLE_MINUTES = { max: 1440, default: 15 } as const
+
+/** `sleepIdleMinutes` as it is used: the default when missing, 0 for never. */
+export const sleepIdleMinutesOf = (settings: Pick<AppSettings, 'sleepIdleMinutes'>): number =>
+  Math.min(SLEEP_IDLE_MINUTES.max, Math.max(0, Math.round(settings.sleepIdleMinutes ?? SLEEP_IDLE_MINUTES.default)))
 
 export interface AppSettings {
   /** Explicit path to the claude binary; auto-detected when empty. */
@@ -152,6 +166,8 @@ export interface AppSettings {
   tabStrip?: TabStrip
   /** Look for a new version at start and once a day. On unless set to false. */
   checkUpdates?: boolean
+  /** Minutes without activity after which a Claude tab is put to sleep; 0 never, missing 15. */
+  sleepIdleMinutes?: number
 }
 
 export type TabStrip = 'top' | 'side'

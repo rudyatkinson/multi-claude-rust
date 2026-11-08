@@ -65,6 +65,8 @@ fn info(id: &str, kind: SessionKind) -> SessionInfo {
         turn: None,
         moving: false,
         arrived: None,
+        keep_awake: false,
+        slept_at: None,
     }
 }
 
@@ -80,6 +82,9 @@ fn fake(manager: &SessionManager, id: &str, kind: SessionKind, intro: Option<(Op
         stream: Stream::new(id.into(), manager.inner.outlet.clone()),
         exited,
         intro,
+        last_input_at: 1,
+        size: None,
+        to_sleep: false,
     };
     let mut t = manager.table();
     t.order.push(id.into());
@@ -363,18 +368,27 @@ fn the_status_line_fills_in_what_it_knows() {
 }
 
 #[test]
-fn saved_tabs_are_the_running_claude_tabs() {
+fn saved_tabs_are_the_running_and_the_sleeping_claude_tabs() {
     let (_rec, manager) = manager();
     fake(&manager, "a", SessionKind::Claude, None);
     fake(&manager, "l", SessionKind::Login, None);
     fake(&manager, "x", SessionKind::Claude, None);
+    fake(&manager, "z", SessionKind::Claude, None);
     manager.table().live.get_mut("x").unwrap().info.status = SessionStatus::Exited;
+    manager.table().live.get_mut("z").unwrap().info.status = SessionStatus::Sleeping;
     manager.rename("a", Some("Build".into()));
     let tabs = manager.saved_tabs();
-    assert_eq!(tabs.len(), 1);
-    assert_eq!(tabs[0].0, "a");
-    assert_eq!(tabs[0].1, SavedTab { profile_id: "work".into(), cwd: "/proj".into(), claude_session_id: None, transcript_path: None, name: Some("Build".into()) });
+    assert_eq!(tabs.iter().map(|(id, tab)| (id.as_str(), tab.asleep)).collect::<Vec<_>>(), [("a", false), ("z", true)]);
+    assert_eq!(
+        tabs[0].1,
+        SavedTab { profile_id: "work".into(), cwd: "/proj".into(), claude_session_id: None, transcript_path: None, name: Some("Build".into()), asleep: false }
+    );
     assert!(manager.has_running());
+    // a sleeping tab is not a running one
+    for id in ["a", "l"] {
+        manager.table().live.get_mut(id).unwrap().info.status = SessionStatus::Exited;
+    }
+    assert!(!manager.has_running());
 }
 
 #[test]
@@ -462,15 +476,29 @@ impl Drop for FakeConsole {
 /// A running session with a pty that only records what is done to it, and the switch that says
 /// its process is gone.
 fn fake_running(manager: &SessionManager, id: &str) -> (PtyLog, watch::Sender<bool>) {
+    let (log, exited, _input) = fake_running_with_input(manager, id);
+    (log, exited)
+}
+
+/// [`fake_running`], with what is written to its terminal.
+fn fake_running_with_input(manager: &SessionManager, id: &str) -> (PtyLog, watch::Sender<bool>, mpsc::Receiver<Vec<u8>>) {
     fake(manager, id, SessionKind::Claude, None);
     let log = PtyLog::default();
-    let (input, _queue) = mpsc::channel();
+    let (input, queue) = mpsc::channel();
     let (exited_tx, exited) = watch::channel(false);
     let mut t = manager.table();
     let live = t.live.get_mut(id).unwrap();
     live.pty = Some(Pty { master: Some(Box::new(FakeConsole(log.clone()))), input, killer: Box::new(FakeKiller(log.clone())) });
     live.exited = exited;
-    (log, exited_tx)
+    (log, exited_tx, queue)
+}
+
+/// What the waiter thread does once the fake process of `id` is gone.
+fn fake_exit(manager: &SessionManager, id: &str, exited: &watch::Sender<bool>) {
+    let stream = manager.table().live[id].stream.clone();
+    stream.end();
+    manager.finish_exit(id, "work", &stream, Some(0));
+    exited.send_replace(true);
 }
 
 /// The pty's log once it has `len` entries (the console is closed on a thread of its own).
@@ -552,6 +580,206 @@ fn attaching_gives_the_replay() {
     assert_eq!((attached.replay.as_str(), attached.seq), ("hello", 5));
     assert_eq!(lock(&rec.data).len(), 1);
     assert!(manager.attach("nope").is_none());
+}
+
+// ---------- sleeping ----------
+
+#[tokio::test]
+async fn a_session_falls_asleep_under_its_own_id_and_keeps_its_tab() {
+    let (rec, manager) = manager();
+    let cleanups = record_cleanups(&manager);
+    let ended = exits(&manager);
+    let (log, exited, _input) = fake_running_with_input(&manager, "a");
+    {
+        let mut t = manager.table();
+        let live = t.live.get_mut("a").unwrap();
+        live.info.name = Some("Build".into());
+        live.info.claude_session_id = Some("c1".into());
+        live.info.turn = Some(Turn { at: 5, kind: TurnKind::Done { background: false } });
+        live.transcript_path = Some("/t/c1.jsonl".into());
+    }
+    let stream = manager.table().live["a"].stream.clone();
+    stream.push(b"what it said");
+    stream.flush();
+
+    let ending = manager.sleep("a", 3_000).unwrap();
+    // the mark keeps a move, a restart or a second sleep out, and the window does not see it
+    assert!(manager.get("a").unwrap().moving);
+    assert!(!manager.try_set_moving("a"));
+    assert!(manager.sleep("a", 3_000).is_err());
+    assert!(rec.lists().is_empty());
+    let asked: &[&str] = if cfg!(windows) { &["close"] } else { &["kill"] };
+    assert_eq!(log_of(&log, 1), asked);
+
+    // the process goes
+    fake_exit(&manager, "a", &exited);
+    ending.await;
+    let info = manager.get("a").unwrap();
+    assert_eq!(info.id, "a");
+    assert_eq!(info.status, SessionStatus::Sleeping);
+    assert!(info.slept_at.is_some());
+    assert!(!info.moving);
+    assert_eq!((info.turn, info.exit_code), (None, None));
+    assert_eq!((info.name.as_deref(), info.claude_session_id.as_deref()), (Some("Build"), Some("c1")));
+    assert_eq!(manager.transcript_of("a").as_deref(), Some("/t/c1.jsonl"));
+    // announced once, as asleep; its files went as for any end, but nobody hears of an exit
+    let lists = rec.lists();
+    assert_eq!(lists.len(), 1);
+    assert_eq!(lists[0].sessions[0].status, SessionStatus::Sleeping);
+    assert_eq!(*lock(&cleanups), [("work".to_owned(), "a".to_owned())]);
+    assert!(ended.try_recv().is_err());
+
+    // it keeps what it showed, takes no input, and keeps the size for its next process
+    let attached = manager.attach("a").unwrap();
+    assert_eq!((attached.replay.as_str(), attached.seq), ("what it said", 12));
+    assert!(!manager.write("a", "x"));
+    manager.resize("a", 90, 33);
+    assert_eq!(manager.table().live["a"].size, Some((90, 33)));
+    assert!(!manager.has_running());
+    let saved = manager.saved_tabs();
+    assert_eq!(saved.len(), 1);
+    assert!(saved[0].1.asleep);
+    assert_eq!(saved[0].1.claude_session_id.as_deref(), Some("c1"));
+
+    // a sleeping tab does not sleep again; closing it has nothing left to clean up
+    assert!(manager.sleep("a", 3_000).is_err());
+    manager.close("a");
+    assert!(manager.get("a").is_none());
+    assert_eq!(lock(&cleanups).len(), 1);
+}
+
+#[test]
+fn only_a_running_claude_tab_can_sleep() {
+    let (_rec, manager) = manager();
+    // no process
+    fake(&manager, "idle", SessionKind::Claude, None);
+    assert!(manager.sleep("idle", 1).is_err());
+    let (_log, _exited) = fake_running(&manager, "login");
+    manager.table().live.get_mut("login").unwrap().info.kind = SessionKind::Login;
+    assert!(manager.sleep("login", 1).is_err());
+    let (_log, _exited) = fake_running(&manager, "moving");
+    assert!(manager.try_set_moving("moving"));
+    assert!(manager.sleep("moving", 1).is_err());
+    assert!(manager.sleep("nope", 1).is_err());
+    // none of them was touched
+    for id in ["idle", "login", "moving"] {
+        assert!(!manager.table().live[id].to_sleep, "{id}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_process_that_outlasts_the_wait_falls_asleep_once_it_ends() {
+    let (_rec, manager) = manager();
+    let (_log, exited) = fake_running(&manager, "a");
+    let ending = tokio::spawn(manager.sleep("a", 500).unwrap());
+    settle().await;
+    tokio::time::advance(Duration::from_millis(500)).await;
+    settle().await;
+    ending.await.unwrap();
+    // still there: the mark comes off, so that the tab can be closed or restarted
+    let info = manager.get("a").unwrap();
+    assert_eq!(info.status, SessionStatus::Running);
+    assert!(!info.moving);
+    fake_exit(&manager, "a", &exited);
+    assert_eq!(manager.get("a").unwrap().status, SessionStatus::Sleeping);
+}
+
+#[test]
+fn an_ended_process_that_was_not_put_to_sleep_ends_its_tab() {
+    let (_rec, manager) = manager();
+    let ended = exits(&manager);
+    let (_log, exited) = fake_running(&manager, "a");
+    fake_exit(&manager, "a", &exited);
+    assert_eq!(manager.get("a").unwrap().status, SessionStatus::Exited);
+    assert_eq!(manager.get("a").unwrap().slept_at, None);
+    assert_eq!(ended.try_recv().unwrap().id, "a");
+}
+
+#[test]
+fn a_tab_of_the_last_run_comes_back_asleep_without_a_process() {
+    let (rec, manager) = manager();
+    let cleanups = record_cleanups(&manager);
+    let mut req = request("/proj/app", SessionKind::Claude);
+    req.name = Some("Build".into());
+    req.prompt = Some("never said".into());
+    let info = manager.create_sleeping(SleepingTab {
+        id: "s".into(),
+        profile_id: "work".into(),
+        cwd: "/proj/app".into(),
+        name: Some("Build".into()),
+        claude_session_id: Some("c1".into()),
+        transcript_path: Some("/t/c1.jsonl".into()),
+        request: req,
+    });
+    assert_eq!((info.id.as_str(), info.status, info.title.as_str()), ("s", SessionStatus::Sleeping, "app"));
+    assert!(info.slept_at.is_some());
+    // announced with the other restored tabs
+    assert!(rec.lists().is_empty());
+    let attached = manager.attach("s").unwrap();
+    assert_eq!((attached.replay.as_str(), attached.seq), ("", 0));
+    assert_eq!(manager.request_of("s").unwrap().prompt, None);
+    assert_eq!(manager.transcript_of("s").as_deref(), Some("/t/c1.jsonl"));
+    assert_eq!(
+        manager.saved_tabs()[0].1,
+        SavedTab {
+            profile_id: "work".into(),
+            cwd: "/proj/app".into(),
+            claude_session_id: Some("c1".into()),
+            transcript_path: Some("/t/c1.jsonl".into()),
+            name: Some("Build".into()),
+            asleep: true,
+        }
+    );
+    assert!(!manager.write("s", "x"));
+    assert!(!manager.has_running());
+    manager.close("s");
+    assert!(lock(&cleanups).is_empty());
+}
+
+#[test]
+fn waking_a_tab_that_is_not_asleep_is_refused_and_cleaned_up() {
+    let (_rec, manager) = manager();
+    let cleanups = record_cleanups(&manager);
+    let (_log, _exited) = fake_running(&manager, "a");
+    let mut plan = shell_plan("/proj", "echo");
+    plan.id = "a".into();
+    assert_eq!(manager.wake(plan.clone()).unwrap_err().to_string(), "This tab is not asleep.");
+    plan.id = "gone".into();
+    assert_eq!(manager.wake(plan).unwrap_err().to_string(), "Session not found");
+    // the files made for the wake go again (`wake_session` plans one only for a tab that sleeps)
+    assert_eq!(*lock(&cleanups), [("work".to_owned(), "a".to_owned()), ("work".to_owned(), "gone".to_owned())]);
+    assert_eq!(manager.get("a").unwrap().status, SessionStatus::Running);
+}
+
+#[test]
+fn typing_counts_as_activity_and_keep_awake_is_announced_when_it_changes() {
+    let (rec, manager) = manager();
+    let (_log, _exited, queue) = fake_running_with_input(&manager, "a");
+    fake(&manager, "l", SessionKind::Login, None);
+    let started = manager.activity()[0].last_input_at;
+    // the terminal's report of its focus is not typing
+    assert!(manager.write("a", "\x1b[I"));
+    assert_eq!(manager.activity()[0].last_input_at, started);
+    std::thread::sleep(Duration::from_millis(5));
+    assert!(manager.write("a", "hi"));
+    assert!(manager.activity()[0].last_input_at > started);
+    assert_eq!(queue.try_iter().collect::<Vec<_>>(), [b"\x1b[I".to_vec(), b"hi".to_vec()]);
+    // the stream knows when output came
+    let stream = manager.table().live["a"].stream.clone();
+    stream.push(b"out");
+    assert_eq!(manager.activity()[0].last_output_at, stream.last_output_at());
+    assert_eq!(manager.activity().iter().map(|a| a.info.id.as_str()).collect::<Vec<_>>(), ["a", "l"]);
+
+    manager.set_keep_awake("a", true).unwrap();
+    manager.set_keep_awake("a", true).unwrap();
+    assert_eq!(rec.lists().len(), 1);
+    assert!(manager.get("a").unwrap().keep_awake);
+    assert!(rec.lists()[0].sessions[0].keep_awake);
+    assert_eq!(manager.set_keep_awake("l", true).unwrap_err().to_string(), "Only a Claude tab can be kept awake.");
+    assert!(manager.set_keep_awake("nope", true).is_err());
+    manager.set_keep_awake("a", false).unwrap();
+    assert_eq!(rec.lists().len(), 2);
+    assert!(!manager.get("a").unwrap().keep_awake);
 }
 
 // ---------- with a real pty (cargo test -p multi-claude -- --ignored) ----------
@@ -708,4 +936,60 @@ fn a_program_that_cannot_start_is_cleaned_up() {
     assert!(manager.list().is_empty());
     assert!(rec.lists().is_empty());
     assert_eq!(lock(&cleanups).as_slice(), &[("work".to_owned(), id)]);
+}
+
+/// Waits at most 20 s for the session to come to `status`.
+fn wait_for_status(manager: &SessionManager, id: &str, status: SessionStatus) {
+    let started = std::time::Instant::now();
+    while manager.get(id).map(|s| s.status) != Some(status) && started.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(manager.get(id).map(|s| s.status), Some(status));
+}
+
+#[test]
+#[ignore = "starts a process in a real pty"]
+fn a_sleeping_session_wakes_under_its_own_id_with_its_output() {
+    let (rec, manager) = manager();
+    let ended = exits(&manager);
+    let cleanups = record_cleanups(&manager);
+    let dir = temp_folder();
+    let cwd = dir.path().to_string_lossy().into_owned();
+    let script = if cfg!(windows) { "echo first& ping -n 60 127.0.0.1 >nul" } else { "echo first; sleep 60" };
+    let info = manager.create(shell_plan(&cwd, script)).unwrap();
+    let started = std::time::Instant::now();
+    while !manager.attach(&info.id).unwrap().replay.contains("first") && started.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    manager.resize(&info.id, 100, 40);
+
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    rt.block_on(manager.sleep(&info.id, 5_000).unwrap());
+    wait_for_status(&manager, &info.id, SessionStatus::Sleeping);
+    // asleep is not ended: nobody hears of an exit, and the output stays
+    assert!(ended.try_recv().is_err());
+    let asleep = manager.attach(&info.id).unwrap();
+    assert!(asleep.replay.contains("first"), "{:?}", asleep.replay);
+    assert!(!manager.write(&info.id, "x"));
+    assert!(manager.saved_tabs()[0].1.asleep);
+
+    // a new process under the same id; its output follows the old one
+    let mut plan = shell_plan(&cwd, "echo second");
+    plan.id = info.id.clone();
+    let woken = manager.wake(plan).unwrap();
+    assert_eq!((woken.id.as_str(), woken.status, woken.slept_at), (info.id.as_str(), SessionStatus::Running, None));
+    assert_eq!(manager.list().len(), 1);
+    // this one ends by itself: an ordinary end this time
+    let done = ended.recv_timeout(Duration::from_secs(20)).expect("the woken session should end");
+    assert_eq!((done.id.as_str(), done.status), (info.id.as_str(), SessionStatus::Exited));
+    let attached = manager.attach(&info.id).unwrap();
+    let (first, second) = (attached.replay.find("first"), attached.replay.find("second"));
+    assert!(first.is_some() && second.is_some() && first < second, "{:?}", attached.replay);
+    // one sequence through both processes, as the window counts it
+    let data = lock(&rec.data).clone();
+    assert!(data.windows(2).all(|w| w[0].seq < w[1].seq));
+    assert_eq!(data.last().unwrap().seq, attached.seq);
+    assert_eq!(attached.seq as usize, mc_core::jsstr::len16(&data.iter().map(|d| d.data.as_str()).collect::<String>()));
+    // both processes let go of their files
+    assert_eq!(lock(&cleanups).iter().filter(|(_, s)| *s == info.id).count(), 2);
 }

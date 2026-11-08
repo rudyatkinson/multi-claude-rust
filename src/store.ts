@@ -33,6 +33,7 @@ import {
 } from '@shared/layout'
 import { chooseOpenTarget } from '@shared/openTarget'
 import { matchShortcut, type ShortcutAction } from '@shared/shortcuts'
+import { isAsleep, sleepToggle } from '@shared/sleep'
 import { parseTerminalTitle, type TabStatus } from '@shared/terminalTitle'
 import { callsForYou, turnKey } from '@shared/turn'
 import type { AgentRef } from '@shared/agents'
@@ -257,11 +258,27 @@ function markSeen(): void {
   set({ attention: Object.fromEntries(Object.entries(s.attention).filter(([id]) => !seen.includes(id))) })
 }
 
+// what the main process was last told the user looks at; undefined before the first report
+let reportedVisible: string | null | undefined
+
+/**
+ * Tells the main process which session the user is looking at: the tab in front in the area that
+ * has the keyboard, while the window has the focus. It is never put to sleep for being idle.
+ */
+function reportVisible(): void {
+  const { activeId } = get()
+  const id = activeId && !isPanel(activeId) && document.hasFocus() ? activeId : null
+  if (id === reportedVisible) return
+  reportedVisible = id
+  mc.send('ui:visible', { id })
+}
+
 /** Makes a new arrangement the current one and tells the main process, which saves it. */
 function setLayout(next: Layout): void {
   if (next === get().layout) return
   set({ layout: next, activeId: activeIdOf(next) })
   mc.send('ui:layout', next)
+  reportVisible()
   markSeen()
   // a search bar goes with its terminal
   const { searchId } = get()
@@ -350,8 +367,12 @@ export function setTabTitle(id: string, title: string): void {
   callAttention([id])
 }
 
-/** Marks tabs as calling for attention and has the main process tell the user about them. */
-function callAttention(ids: readonly string[]): void {
+/**
+ * Marks tabs as calling for attention and has the main process tell the user about them. A tab
+ * that sleeps, or is being put to sleep, has nothing to say: its title goes quiet as its process ends.
+ */
+function callAttention(all: readonly string[]): void {
+  const ids = all.filter((id) => !fallingAsleep.has(id) && !isAsleep(get().sessions.find((s) => s.id === id)))
   if (ids.length === 0) return
   set((s) => ({ attention: { ...s.attention, ...Object.fromEntries(ids.map((id) => [id, true as const])) } }))
   const { sessions } = get()
@@ -488,13 +509,60 @@ export async function transferSession(id: string, profileId: string): Promise<vo
   if (info && account) toast('info', `The conversation continues on ${account}.`)
 }
 
+// ---------- sleeping tabs ----------
+
+// tabs asked to sleep from here whose process is still ending, and tabs being woken
+const fallingAsleep = new Set<string>()
+const waking = new Set<string>()
+
+/** "Sleep now": the tab's process ends; the tab keeps its place, its output and its conversation. */
+export async function sleepSession(id: string): Promise<void> {
+  if (fallingAsleep.has(id)) return
+  fallingAsleep.add(id)
+  try {
+    await attempt(mc.invoke('sessions:sleep', id))
+  } finally {
+    fallingAsleep.delete(id)
+  }
+}
+
+/**
+ * Starts a sleeping tab's Claude again, on its conversation, and gives it the keyboard. The tab
+ * and its terminal stay; the new output follows what it showed.
+ */
+export async function wakeSession(id: string): Promise<void> {
+  if (waking.has(id) || !isAsleep(get().sessions.find((s) => s.id === id))) return
+  waking.add(id)
+  try {
+    await attempt(mc.invoke('sessions:wake', id))
+  } finally {
+    waking.delete(id)
+  }
+  if (get().activeId === id) focusTerminal(id)
+}
+
+/** A tab kept awake is never put to sleep for being idle; "Sleep now" still works. */
+export function setKeepAwake(id: string, on: boolean): void {
+  void attempt(mc.invoke('sessions:setKeepAwake', id, on))
+}
+
+/** Ctrl+Shift+Z: wakes the active tab when it sleeps, else puts it to sleep. */
+function toggleSleep(): void {
+  const { activeId, sessions } = get()
+  const session = activeId ? sessions.find((s) => s.id === activeId) : undefined
+  const action = sleepToggle(session)
+  if (action === 'wake') void wakeSession(session!.id)
+  else if (action === 'sleep') void sleepSession(session!.id)
+}
+
 export function dismissLimit(key: string): void {
   set((s) => ({ dismissedLimits: { ...s.dismissedLimits, [key]: true } }))
 }
 
 /** Opens a past conversation in a tab, or shows the tab it is already open in. */
 export async function openConversation(entry: ConversationEntry): Promise<void> {
-  const open = get().sessions.find((s) => s.profileId === entry.profileId && s.claudeSessionId === entry.id && s.status === 'running')
+  // a sleeping tab has it open as well: it wakes when it is clicked into
+  const open = get().sessions.find((s) => s.profileId === entry.profileId && s.claudeSessionId === entry.id && s.status !== 'exited')
   if (open) {
     setActive(open.id)
     refocus()
@@ -609,6 +677,9 @@ export function runShortcut(action: ShortcutAction): void {
       break
     case 'split':
       if (activeId) splitTab(activeId, layout.focused, 'right')
+      return
+    case 'sleep':
+      toggleSleep()
       return
   }
   refocus()
@@ -941,6 +1012,9 @@ export async function init(): Promise<void> {
   setInterval(() => set({ now: Date.now() }), 30_000)
   // looking at the window again counts as having seen what is on screen
   window.addEventListener('focus', markSeen)
+  // a tab looked at stays awake; one in a window in the background may sleep
+  window.addEventListener('focus', reportVisible)
+  window.addEventListener('blur', reportVisible)
   listenForShortcuts()
   getAppVersion().then(
     (appVersion) => set({ appVersion }),
@@ -954,6 +1028,9 @@ export async function init(): Promise<void> {
   const parsed = known && parseLayout(known)
   const layout = reconcile(parsed ? knownPanelsOnly(parsed) : emptyLayout(), state.sessions)
   set({ ...state, ready: true, layout, activeId: activeIdOf(layout) })
+  // after a reload the main process still has what the page before it reported
+  reportedVisible = undefined
+  reportVisible()
   // from here on the main process may deliver folders that were queued while the window loaded
   await mc.invoke('app:ready')
 }

@@ -1,5 +1,14 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { FONT_SIZE, PROFILE_COLORS, tabStripOf, type AuthKind, type ExplorerMenuStatus, type TabStrip } from '@shared/types'
+import {
+  FONT_SIZE,
+  PROFILE_COLORS,
+  SLEEP_IDLE_MINUTES,
+  sleepIdleMinutesOf,
+  tabStripOf,
+  type AuthKind,
+  type ExplorerMenuStatus,
+  type TabStrip
+} from '@shared/types'
 import { mc } from '../api'
 import { attempt, dismissToast, mainProfileName, setActive, setModal, toast, useStore } from '../store'
 import { checkNow, useUpdate } from '../updates'
@@ -335,15 +344,19 @@ export function SettingsDialog() {
   const canStartWithSystem = packaged && platform !== 'linux'
   const [tabStrip, setTabStrip] = useState<TabStrip>(tabStripOf(settings))
   const [checkUpdates, setCheckUpdates] = useState(settings.checkUpdates !== false)
+  const [sleepMinutes, setSleepMinutes] = useState(String(sleepIdleMinutesOf(settings)))
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault()
     const size = Number(fontSize)
+    // an emptied field keeps what was set; the main process rounds and holds it to a day
+    const minutes = sleepMinutes.trim() === '' ? NaN : Number(sleepMinutes)
     await attempt(
       mc
         .invoke('settings:update', {
           claudePath,
           fontSize: Number.isFinite(size) ? size : settings.fontSize,
+          sleepIdleMinutes: Number.isFinite(minutes) ? minutes : sleepIdleMinutesOf(settings),
           restoreTabs,
           notifications,
           limitAlerts,
@@ -384,6 +397,20 @@ export function SettingsDialog() {
             <input type="checkbox" checked={notifications} onChange={(e) => setNotifications(e.target.checked)} />
             Notify when a session in the background needs input
           </label>
+          <label className="check sleep-setting">
+            Put idle sessions to sleep after
+            <input
+              type="number"
+              min={0}
+              max={SLEEP_IDLE_MINUTES.max}
+              step={1}
+              value={sleepMinutes}
+              aria-label="Minutes before an idle session sleeps"
+              onChange={(e) => setSleepMinutes(e.target.value)}
+            />
+            minutes (0 = never)
+          </label>
+          <p className="note">A sleeping tab keeps its place and its conversation but runs no process; it wakes when you click into it or type.</p>
         </div>
         <div className="field">
           <span>Accounts</span>

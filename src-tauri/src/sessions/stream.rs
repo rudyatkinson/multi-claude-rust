@@ -3,13 +3,14 @@
 //! `attach` sends what waits before it takes the replay. One lock orders all of it, so `seq`
 //! only grows in the order the events go out.
 
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use mc_core::types::PtyData;
 
 use super::output::{OutputBuffer, FLUSH_MS, FLUSH_UNITS};
-use super::Outlet;
+use super::{now_ms, Outlet};
 
 #[derive(Default)]
 struct State {
@@ -27,11 +28,30 @@ pub(crate) struct Stream {
     state: Mutex<State>,
     wake: Condvar,
     outlet: Arc<dyn Outlet>,
+    /// When the pty last printed something (ms since the epoch); when the stream was made before that.
+    last_output: AtomicI64,
 }
 
 impl Stream {
     pub(crate) fn new(id: String, outlet: Arc<dyn Outlet>) -> Arc<Self> {
-        Arc::new(Stream { id, state: Mutex::new(State::default()), wake: Condvar::new(), outlet })
+        Self::with_buffer(id, outlet, OutputBuffer::default())
+    }
+
+    /// The stream of a process that takes over from the one of `before` in the same tab: its
+    /// replay and `seq` go on from there (see [`OutputBuffer::carried_over`]).
+    pub(crate) fn following(id: String, outlet: Arc<dyn Outlet>, before: &Stream) -> Arc<Self> {
+        let buf = before.lock().buf.carried_over();
+        Self::with_buffer(id, outlet, buf)
+    }
+
+    fn with_buffer(id: String, outlet: Arc<dyn Outlet>, buf: OutputBuffer) -> Arc<Self> {
+        let state = State { buf, ..State::default() };
+        Arc::new(Stream { id, state: Mutex::new(state), wake: Condvar::new(), outlet, last_output: AtomicI64::new(now_ms()) })
+    }
+
+    /// When the pty last printed something; when the stream was made, before that.
+    pub(crate) fn last_output_at(&self) -> i64 {
+        self.last_output.load(Ordering::Relaxed)
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -53,6 +73,9 @@ impl Stream {
 
     /// Output read from the pty.
     pub(crate) fn push(&self, bytes: &[u8]) {
+        if !bytes.is_empty() {
+            self.last_output.store(now_ms(), Ordering::Relaxed);
+        }
         let mut st = self.lock();
         if st.closed {
             // a process that outlives its tab must not fill memory
@@ -222,6 +245,23 @@ mod tests {
         stream.push(b"again");
         stream.flush();
         assert!(rec.sent().is_empty());
+    }
+
+    #[test]
+    fn a_following_stream_goes_on_with_the_seq_and_notes_when_output_came() {
+        let (rec, before) = stream();
+        before.push(b"old ");
+        before.end();
+        before.flush();
+        let next = Stream::following("s1".into(), rec.clone(), &before);
+        assert_eq!(next.attach(), ("old ".to_owned(), 4));
+        let started = next.last_output_at();
+        std::thread::sleep(Duration::from_millis(20));
+        next.push(b"new");
+        next.flush();
+        assert!(next.last_output_at() > started);
+        assert_eq!(rec.sent(), vec![("old ".to_owned(), 4), ("new".to_owned(), 7)]);
+        assert_eq!(next.attach(), ("old new".to_owned(), 7));
     }
 
     #[test]

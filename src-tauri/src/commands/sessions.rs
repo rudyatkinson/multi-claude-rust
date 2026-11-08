@@ -11,7 +11,7 @@ use serde_json::Value;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::app::launch::{restart_session, start_session};
+use crate::app::launch::{restart_session, sleep_session, start_session, wake_session};
 use crate::app::{note_turn, remember_folder};
 use crate::error::{CmdError, CmdResult};
 use crate::external_terminal::open_external_session;
@@ -53,6 +53,31 @@ pub async fn sessions_restart(state: State<'_, AppState>, id: String, continue_l
     let id = validate::id(&id, "session")?;
     let continue_last = continue_last.as_ref().is_some_and(validate::flag);
     Ok(restart_session(&state, id, continue_last)?)
+}
+
+/// `sessions:sleep` ("Sleep now"): ends the process of a running Claude tab and keeps the tab, with
+/// its output and its conversation, until it is woken. Resolves once the process is gone.
+#[tauri::command]
+pub async fn sessions_sleep(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let id = validate::id(&id, "session")?;
+    Ok(sleep_session(&state, id).await?)
+}
+
+/// `sessions:wake`: starts a sleeping tab's Claude again under the same session id, continuing
+/// its conversation. A tab that is awake is given back as it is.
+#[tauri::command]
+pub async fn sessions_wake(state: State<'_, AppState>, id: String) -> CmdResult<SessionInfo> {
+    let id = validate::id(&id, "session")?;
+    Ok(wake_session(&state, id)?)
+}
+
+/// `sessions:setKeepAwake`: a tab with it is never put to sleep for being idle; `on` is only a
+/// real `true`.
+#[tauri::command]
+pub fn sessions_set_keep_awake(state: State<'_, AppState>, id: String, on: Option<Value>) -> CmdResult<()> {
+    let id = validate::id(&id, "session")?;
+    let on = on.as_ref().is_some_and(validate::flag);
+    Ok(state.sessions.set_keep_awake(id, on)?)
 }
 
 /// `sessions:revealFolder`: the session's folder in the file manager. The folder comes from the

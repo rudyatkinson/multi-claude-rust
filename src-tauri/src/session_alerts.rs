@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, Once, PoisonError, RwLock};
 use std::time::Duration;
 
 use mc_core::turn::{stop_sentence, turn_key};
-use mc_core::types::{Activate, SessionInfo, Turn, TurnKind, TurnWait};
+use mc_core::types::{Activate, SessionInfo, SessionStatus, Turn, TurnKind, TurnWait};
 use tauri::{AppHandle, Manager};
 
 use crate::events;
@@ -145,7 +145,8 @@ impl Core {
         if deps.is_workflow_step(id) {
             return;
         }
-        let Some(info) = deps.session(id) else { return };
+        // a tab that has just fallen asleep has nothing to say
+        let Some(info) = deps.session(id).filter(|s| s.status != SessionStatus::Sleeping) else { return };
         self.output.flash();
         let account = deps.profile_name(&info.profile_id).unwrap_or_else(|| "Claude".to_string());
         let title = if title.is_empty() { info.title.as_str() } else { title };
@@ -368,6 +369,7 @@ mod tests {
         turns: Mutex<HashMap<String, Turn>>,
         gone: Mutex<HashSet<String>>,
         steps: Mutex<HashSet<String>>,
+        asleep: Mutex<HashSet<String>>,
         notifications: AtomicBool,
         accounts: bool,
     }
@@ -378,6 +380,7 @@ mod tests {
                 turns: Mutex::default(),
                 gone: Mutex::default(),
                 steps: Mutex::default(),
+                asleep: Mutex::default(),
                 notifications: AtomicBool::new(true),
                 accounts: true,
             }
@@ -406,6 +409,8 @@ mod tests {
             turn,
             moving: false,
             arrived: None,
+            keep_awake: false,
+            slept_at: None,
         }
     }
 
@@ -414,7 +419,11 @@ mod tests {
             if lock(&self.gone).contains(id) {
                 return None;
             }
-            Some(info(id, lock(&self.turns).get(id).cloned()))
+            let mut info = info(id, lock(&self.turns).get(id).cloned());
+            if lock(&self.asleep).contains(id) {
+                info.status = SessionStatus::Sleeping;
+            }
+            Some(info)
         }
         fn profile_name(&self, profile_id: &str) -> Option<String> {
             (self.accounts && profile_id == "p1").then(|| "Main".to_string())
@@ -507,6 +516,16 @@ mod tests {
         rig.alerts.attention("t1", "Fix the build");
         assert_eq!(rig.told(), ["t1/Fix the build: Main is waiting for your input", "t1/Fix the build: Main is waiting for your input"]);
         assert_eq!(rig.output.flashes.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn says_nothing_about_a_sleeping_tab() {
+        let rig = Rig::new();
+        lock(&rig.deps.asleep).insert("t1".into());
+        // its title went quiet as its process ended
+        rig.alerts.attention("t1", "Fix the build");
+        assert!(rig.told().is_empty());
+        assert_eq!(rig.output.flashes.load(Ordering::SeqCst), 0);
     }
 
     #[test]

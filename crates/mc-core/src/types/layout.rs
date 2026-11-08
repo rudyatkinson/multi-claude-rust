@@ -5,7 +5,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-use super::serde_util::{js_number, minus_one, ok_or_none};
+use super::serde_util::{is_false, js_number, minus_one, ok_or_none};
 
 /// `row`: the first child is left of the second; `column`: it is above it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -184,6 +184,9 @@ pub struct SavedTab {
     /// The user's own name for the tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The tab was asleep (`asleep?: true`): it comes back asleep, without a process.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub asleep: bool,
 }
 
 /// An entry of `tabs.json`:
@@ -291,6 +294,13 @@ pub struct RestoreRequest {
     pub resume: Option<ResumeConversation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The tab was asleep: it comes back asleep, without starting anything. Only ever set
+    /// together with `resume`; an asleep tab without a conversation on disk is not restored.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub asleep: bool,
+    /// Where Claude Code kept the conversation, for an asleep tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -333,6 +343,19 @@ mod tests {
         assert!(serde_json::from_value::<SavedEntry>(json!({ "kind": "panel", "panel": "usage" })).is_err());
         assert!(serde_json::from_value::<SavedEntry>(json!({ "kind": "panel" })).is_err());
         assert!(serde_json::from_value::<SavedEntry>(json!({ "kind": "terminal", "profileId": "main", "cwd": "C:\\a" })).is_err());
+    }
+
+    #[test]
+    fn an_asleep_tab_says_so_and_an_awake_one_says_nothing() {
+        let asleep: SavedTab = serde_json::from_value(json!({ "profileId": "main", "cwd": "C:\\a", "claudeSessionId": "c1", "asleep": true })).unwrap();
+        assert!(asleep.asleep);
+        assert_eq!(serde_json::to_value(&asleep).unwrap(), json!({ "profileId": "main", "cwd": "C:\\a", "claudeSessionId": "c1", "asleep": true }));
+        // files of older versions, and a running tab, have no flag
+        let awake: SavedTab = serde_json::from_value(json!({ "profileId": "main", "cwd": "C:\\a" })).unwrap();
+        assert!(!awake.asleep);
+        assert_eq!(serde_json::to_value(&awake).unwrap(), json!({ "profileId": "main", "cwd": "C:\\a" }));
+        let entry = SavedEntry::Session(asleep);
+        assert_eq!(serde_json::to_value(&entry).unwrap()["asleep"], json!(true));
     }
 
     #[test]
