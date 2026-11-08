@@ -36,8 +36,7 @@ pub const UPDATER_AVAILABLE: &str = "updater:available";
 /// The download of the update: `{ downloaded, total }` in bytes, `total` null when not known.
 pub const UPDATER_PROGRESS: &str = "updater:progress";
 
-/// The window's channels of the updater. They are in `INVOKE_CHANNELS` of `src/shared/ipc.ts`;
-/// TODO: add them to mc-core's copy of that list (`mc_core::types::INVOKE_CHANNELS`) as well.
+/// The window's channels of the updater, as `src/shared/ipc.ts` and `mc_core::types::INVOKE_CHANNELS` list them.
 pub const INVOKE_CHANNELS: [&str; 3] = ["updater:check", "updater:install", "updater:dismiss"];
 
 /// The first look, once the window and the accounts had their turn.

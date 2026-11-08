@@ -170,13 +170,6 @@ mod tests {
     fn every_channel_of_the_renderer_has_a_command() {
         let mut expected: Vec<String> = INVOKE_CHANNELS.iter().chain(SEND_CHANNELS.iter()).map(|c| command_name(c)).collect();
         expected.push("app_get_version".into());
-        // TODO: the updater's channels are in the renderer's INVOKE_CHANNELS, not yet in mc-core's copy of it
-        for channel in crate::updater::INVOKE_CHANNELS {
-            let name = command_name(channel);
-            if !expected.contains(&name) {
-                expected.push(name);
-            }
-        }
         expected.sort();
         let mut registered: Vec<String> = super::REGISTERED.iter().map(|s| (*s).to_owned()).collect();
         registered.sort();

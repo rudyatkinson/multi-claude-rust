@@ -576,13 +576,13 @@ fn ipc_payloads() {
     let _: NewSession = round_trip(json!({}));
     let _: TransferMode = round_trip(json!("move"));
 
-    assert_eq!(INVOKE_CHANNELS.len(), 87);
+    assert_eq!(INVOKE_CHANNELS.len(), 90);
     assert_eq!(SEND_CHANNELS, ["pty:write", "pty:resize", "ui:layout", "session:attention", "ui:unsaved"]);
-    assert_eq!(EVENT_CHANNELS.len(), 11);
+    assert_eq!(EVENT_CHANNELS.len(), 13);
     let mut all: Vec<&str> = INVOKE_CHANNELS.iter().chain(&SEND_CHANNELS).chain(&EVENT_CHANNELS).copied().collect();
     all.sort_unstable();
     all.dedup();
-    assert_eq!(all.len(), 87 + 5 + 11, "every channel name is used once");
+    assert_eq!(all.len(), 90 + 5 + 13, "every channel name is used once");
 }
 
 #[test]

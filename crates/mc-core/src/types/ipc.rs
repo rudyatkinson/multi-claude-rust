@@ -99,6 +99,9 @@ pub mod channel {
     pub const CLIPBOARD_WRITE_TEXT: &str = "clipboard:writeText";
     pub const EXPLORER_MENU_STATUS: &str = "explorerMenu:status";
     pub const EXPLORER_MENU_SET: &str = "explorerMenu:set";
+    pub const UPDATER_CHECK: &str = "updater:check";
+    pub const UPDATER_INSTALL: &str = "updater:install";
+    pub const UPDATER_DISMISS: &str = "updater:dismiss";
 
     // renderer -> backend, fire and forget
     pub const PTY_WRITE: &str = "pty:write";
@@ -119,12 +122,14 @@ pub mod channel {
     pub const UI_NEW_SESSION: &str = "ui:newSession";
     pub const WORKFLOWS_CHANGED: &str = "workflows:changed";
     pub const RUNS_CHANGED: &str = "runs:changed";
+    pub const UPDATER_AVAILABLE: &str = "updater:available";
+    pub const UPDATER_PROGRESS: &str = "updater:progress";
 }
 
 use channel as c;
 
 /// Request/response calls (renderer -> backend), in the TypeScript order.
-pub const INVOKE_CHANNELS: [&str; 87] = [
+pub const INVOKE_CHANNELS: [&str; 90] = [
     c::APP_GET_STATE,
     c::APP_READY,
     c::PROFILES_CREATE,
@@ -212,13 +217,16 @@ pub const INVOKE_CHANNELS: [&str; 87] = [
     c::CLIPBOARD_WRITE_TEXT,
     c::EXPLORER_MENU_STATUS,
     c::EXPLORER_MENU_SET,
+    c::UPDATER_CHECK,
+    c::UPDATER_INSTALL,
+    c::UPDATER_DISMISS,
 ];
 
 /// Fire-and-forget messages (renderer -> backend).
 pub const SEND_CHANNELS: [&str; 5] = [c::PTY_WRITE, c::PTY_RESIZE, c::UI_LAYOUT, c::SESSION_ATTENTION, c::UI_UNSAVED];
 
 /// Pushed events (backend -> renderer).
-pub const EVENT_CHANNELS: [&str; 11] = [
+pub const EVENT_CHANNELS: [&str; 13] = [
     c::PTY_DATA,
     c::SESSIONS_CHANGED,
     c::PROFILES_CHANGED,
@@ -230,6 +238,8 @@ pub const EVENT_CHANNELS: [&str; 11] = [
     c::UI_NEW_SESSION,
     c::WORKFLOWS_CHANGED,
     c::RUNS_CHANGED,
+    c::UPDATER_AVAILABLE,
+    c::UPDATER_PROGRESS,
 ];
 
 // ---------- send payloads ----------
