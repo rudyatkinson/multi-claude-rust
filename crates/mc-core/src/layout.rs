@@ -31,8 +31,8 @@ pub use parse::{parse_layout, parse_saved_layout};
 pub use saved::{deserialize, remap_saved, serialize};
 pub use tree::{
     activate, active_id_of, can_split, cycle_tab, empty_layout, find_group, flatten, focus_group, focus_step, group_of_tab,
-    groups_of, is_panel, is_visible, merge_all, move_tab, reconcile, set_ratio, split_root, split_with, tab_at, visible_ids,
-    TabPos, PANEL_PREFIX,
+    groups_of, is_panel, is_visible, merge_all, move_tab, reconcile, remove_tab, set_ratio, split_root, split_with, tab_at,
+    visible_ids, TabPos, PANEL_PREFIX,
 };
 
 pub use crate::types::{

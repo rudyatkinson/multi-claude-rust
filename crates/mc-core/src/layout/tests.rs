@@ -1,5 +1,5 @@
-//! `test/layout.test.ts`, one for one (the `reorder` and `dropTarget` parts are in `tab_order`),
-//! then what the Rust version adds: panel tabs, the strip on the left, the limits of `parse_layout`.
+//! `test/layout.test.ts`, one for one (the `reorder` and `dropTarget` parts are in `tab_order`):
+//! panel tabs and the strip on the left are in both, the limits of `parse_layout` only here.
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -852,6 +852,21 @@ mod panels {
         assert_eq!(shape(&reconcile(&apart, &refs(&["b"])).root), "H(b,panel:usage)");
         // a tab that merely looks like one is still a session when it lacks the prefix
         assert_eq!(picture(&reconcile(&one(&["a", "panel-usage"]), &refs(&["a"]))), "*[a]");
+    }
+
+    #[test]
+    fn remove_tab_takes_a_panel_out_and_shows_the_neighbour() {
+        let l = activate(&one(&["a", "panel:library", "b"]), "panel:library").into_owned();
+        assert_eq!(picture(&remove_tab(&l, "panel:library")), "*a [b]");
+        assert!(same(&remove_tab(&l, "panel:workflows"), &l));
+        // the area of a panel alone folds away, and the keyboard goes to an area that is left
+        let apart = split_with(&l, "panel:library", "g1", Edge::Right).into_owned();
+        assert_eq!(picture(&apart), "a [b] | *[panel:library]");
+        let closed = remove_tab(&apart, "panel:library").into_owned();
+        assert_eq!(picture(&closed), "*a [b]");
+        check(&closed);
+        // the last tab of all leaves one empty area
+        assert_eq!(picture(&remove_tab(&one(&["panel:workflows"]), "panel:workflows")), "*");
     }
 }
 

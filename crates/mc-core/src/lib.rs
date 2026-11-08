@@ -35,3 +35,7 @@ pub mod paths_input;
 pub mod text_file;
 pub mod transfer;
 pub mod workflow;
+pub mod agents;
+pub mod instructions;
+pub mod memory;
+pub mod skills;

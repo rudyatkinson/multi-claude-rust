@@ -385,6 +385,16 @@ pub fn set_ratio<'a>(l: &'a Layout, split_id: &str, ratio: f64) -> Cow<'a, Layou
     }
 }
 
+/// Takes a tab out of the layout: its area shows the tab that took its position, an area left
+/// empty folds away. For panel tabs; the tabs of sessions follow the session list ([`reconcile`]).
+pub fn remove_tab<'a>(l: &'a Layout, tab_id: &str) -> Cow<'a, Layout> {
+    if group_of_tab(l, tab_id).is_none() {
+        return Cow::Borrowed(l);
+    }
+    let root = map_groups(&l.root, &mut |g| without_tab(g, tab_id));
+    settle(l, root, &l.focused, l.seq)
+}
+
 /// Puts every tab back into one area, in reading order.
 pub fn merge_all(l: &Layout) -> Cow<'_, Layout> {
     let all = groups_of(&l.root);
@@ -403,9 +413,9 @@ pub fn merge_all(l: &Layout) -> Cow<'_, Layout> {
 /// the keyboard. Returns the same layout (`Cow::Borrowed`) when nothing changes.
 ///
 /// Panel tabs (ids starting with [`PANEL_PREFIX`]) are never in the session list and count as
-/// alive all the same: they stay where they are until the renderer removes them itself. This is
-/// the only place where the Rust version differs from `layout.ts` (where every tab is a session);
-/// session ids are UUIDs, so no session tab can be mistaken for a panel.
+/// alive all the same: they stay where they are until the renderer removes them itself
+/// ([`remove_tab`]). `layout.ts` does the same; session ids are UUIDs, so no session tab can be
+/// mistaken for a panel.
 pub fn reconcile<'a>(l: &'a Layout, sessions: &[SessionRef]) -> Cow<'a, Layout> {
     let ids: HashSet<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
     let live = |id: &str| ids.contains(id) || is_panel(id);
