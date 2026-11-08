@@ -1,0 +1,178 @@
+{
+  "prompt": {
+    "event": "UserPromptSubmit",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "axios/1.15.2"
+    },
+    "body": {
+      "session_id": "feb42e5d-528e-4833-871b-2022ea08ba0e",
+      "transcript_path": "C:\\Users\\me\\.claude\\projects\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e.jsonl",
+      "cwd": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-a",
+      "scratchpad_dir": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e\\scratchpad",
+      "prompt_id": "c8b47cf5-f596-4fe8-986f-c906c630c912",
+      "permission_mode": "auto",
+      "hook_event_name": "UserPromptSubmit",
+      "prompt": "Reply with exactly: pong"
+    }
+  },
+  "stop": {
+    "event": "Stop",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "axios/1.15.2"
+    },
+    "body": {
+      "session_id": "feb42e5d-528e-4833-871b-2022ea08ba0e",
+      "transcript_path": "C:\\Users\\me\\.claude\\projects\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e.jsonl",
+      "cwd": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-a",
+      "scratchpad_dir": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e\\scratchpad",
+      "prompt_id": "c8b47cf5-f596-4fe8-986f-c906c630c912",
+      "permission_mode": "auto",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "Stop",
+      "stop_hook_active": false,
+      "last_assistant_message": "pong",
+      "background_tasks": [],
+      "session_crons": []
+    }
+  },
+  "planPreToolUse": {
+    "event": "PreToolUse",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "axios/1.15.2"
+    },
+    "body": {
+      "session_id": "feb42e5d-528e-4833-871b-2022ea08ba0e",
+      "transcript_path": "C:\\Users\\me\\.claude\\projects\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e.jsonl",
+      "cwd": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-a",
+      "scratchpad_dir": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e\\scratchpad",
+      "prompt_id": "80e691a9-5d39-442e-8d22-f897e1237e37",
+      "permission_mode": "plan",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "PreToolUse",
+      "tool_name": "ExitPlanMode",
+      "tool_input": {
+        "plan": "PLAN-MARKER-7731\n1. Create hello.txt in the working directory containing the word \"hi\". 2. Verify by reading the file back.\n",
+        "planFilePath": "C:\\Users\\me\\.claude\\plans\\workflow-step-follow-the-squishy-rose.md"
+      },
+      "tool_use_id": "toolu_01ErEXKDZinQtcaNFBrCpqJi"
+    }
+  },
+  "planPermission": {
+    "event": "PermissionRequest",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "axios/1.15.2"
+    },
+    "body": {
+      "session_id": "feb42e5d-528e-4833-871b-2022ea08ba0e",
+      "transcript_path": "C:\\Users\\me\\.claude\\projects\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e.jsonl",
+      "cwd": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-a",
+      "scratchpad_dir": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--code-proj-a\\feb42e5d-528e-4833-871b-2022ea08ba0e\\scratchpad",
+      "prompt_id": "80e691a9-5d39-442e-8d22-f897e1237e37",
+      "permission_mode": "plan",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "ExitPlanMode",
+      "tool_input": {
+        "plan": "PLAN-MARKER-7731\n1. Create hello.txt in the working directory containing the word \"hi\". 2. Verify by reading the file back.\n",
+        "planFilePath": "C:\\Users\\me\\.claude\\plans\\workflow-step-follow-the-squishy-rose.md"
+      }
+    }
+  },
+  "writePermission": {
+    "event": "PermissionRequest",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "axios/1.15.2"
+    },
+    "body": {
+      "session_id": "99ded701-22af-4dd7-9add-db0be8bce371",
+      "transcript_path": "C:\\Users\\me\\.claude\\projects\\C--code-proj-b\\99ded701-22af-4dd7-9add-db0be8bce371.jsonl",
+      "cwd": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-b",
+      "scratchpad_dir": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--code-proj-b\\99ded701-22af-4dd7-9add-db0be8bce371\\scratchpad",
+      "prompt_id": "72e1e5b7-b33d-46e7-a95e-29ae3e97c0b0",
+      "permission_mode": "default",
+      "effort": {
+        "level": "low"
+      },
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-b\\marker-END-4417.txt",
+        "content": "ok\n"
+      },
+      "permission_suggestions": [
+        {
+          "type": "setMode",
+          "mode": "acceptEdits",
+          "destination": "session"
+        }
+      ]
+    }
+  },
+  "question": {
+    "event": "PermissionRequest",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "axios/1.15.2"
+    },
+    "body": {
+      "session_id": "f83f5307-5f54-4cad-ad8d-5901afbfe1b4",
+      "transcript_path": "C:\\Users\\me\\.claude\\projects\\C--code-proj-b\\f83f5307-5f54-4cad-ad8d-5901afbfe1b4.jsonl",
+      "cwd": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-b",
+      "scratchpad_dir": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--code-proj-b\\f83f5307-5f54-4cad-ad8d-5901afbfe1b4\\scratchpad",
+      "prompt_id": "e5485de3-1ad7-45fa-b68b-9bb1b8d63c1f",
+      "permission_mode": "auto",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Do you prefer tea or coffee?",
+            "header": "Drink",
+            "options": [
+              {
+                "label": "Tea",
+                "description": "You prefer tea."
+              },
+              {
+                "label": "Coffee",
+                "description": "You prefer coffee."
+              }
+            ],
+            "multiSelect": false
+          }
+        ]
+      }
+    }
+  },
+  "notification": {
+    "event": "Notification",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "axios/1.15.2"
+    },
+    "body": {
+      "session_id": "f83f5307-5f54-4cad-ad8d-5901afbfe1b4",
+      "transcript_path": "C:\\Users\\me\\.claude\\projects\\C--code-proj-b\\f83f5307-5f54-4cad-ad8d-5901afbfe1b4.jsonl",
+      "cwd": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--Users-me-multi-claude\\986da80c-c577-40a7-a025-03743da763db\\scratchpad\\proj-b",
+      "scratchpad_dir": "C:\\Users\\me\\AppData\\Local\\Temp\\claude\\C--code-proj-b\\f83f5307-5f54-4cad-ad8d-5901afbfe1b4\\scratchpad",
+      "prompt_id": "e5485de3-1ad7-45fa-b68b-9bb1b8d63c1f",
+      "hook_event_name": "Notification",
+      "message": "Claude needs your permission",
+      "notification_type": "permission_prompt"
+    }
+  }
+}
