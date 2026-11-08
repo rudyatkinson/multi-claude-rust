@@ -3,6 +3,15 @@
 All notable changes to Multi Claude. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This file is shown inside the app under **What's new**.
 
+## [0.6.1] - 2026-11-09
+
+### Fixed
+- The update bar came back only at the next daily check after the window was reloaded. A waiting update is now shown again as soon as the window listens.
+- Release builds for Intel Macs are no longer attempted; the app is released for Windows x64 and Apple silicon.
+
+### Changed
+- CI runs on the current GitHub Actions versions (Node 24).
+
 ## [0.6.0] - 2026-11-08
 
 ### Added

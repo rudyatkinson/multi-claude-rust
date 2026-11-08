@@ -154,6 +154,7 @@ pub fn renderer_ready(state: &AppState) {
     }
     first_show(state);
     flush_pending(state);
+    crate::updater::tell_again(state);
 }
 
 /// A page started loading in the main window (a reload): until it reports ready again nothing is

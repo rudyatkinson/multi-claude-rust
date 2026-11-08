@@ -3,7 +3,7 @@ resolver = "2"
 members = ["src-tauri", "crates/mc-core", "crates/mc-explorer-command"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 rust-version = "1.85"
 license = "UNLICENSED"

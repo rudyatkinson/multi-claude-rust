@@ -92,6 +92,8 @@ struct Progress {
 pub struct Updates {
     /// The update the last check found, for [`install`].
     pending: Mutex<Option<Update>>,
+    /// What the window is told about it; kept so that a reloaded window hears of it again.
+    pending_info: Mutex<Option<UpdateInfo>>,
     seen: Mutex<Seen>,
     /// Between "Install and restart" and the end of this process, or a failed download.
     installing: AtomicBool,
@@ -192,15 +194,28 @@ pub async fn check(app: &AppHandle) -> CmdResult<Option<UpdateInfo>> {
     let found = updater(app)?.check().await.map_err(|e| CmdError(format!("Could not check for updates: {e}")))?;
     let Some(update) = found else {
         *lock(&state.updater.pending) = None;
+        *lock(&state.updater.pending_info) = None;
         return Ok(None);
     };
     let info = UpdateInfo::of(&update);
     *lock(&state.updater.pending) = Some(update);
+    *lock(&state.updater.pending_info) = Some(info.clone());
     // a window that does not listen yet would miss it; it is announced at the next check then
     if is(&state.flags.renderer_ready) && lock(&state.updater.seen).announce(&info.version) {
         events::emit(app, UPDATER_AVAILABLE, Available { info: info.clone() });
     }
     Ok(Some(info))
+}
+
+/// The window listens again after a reload and has forgotten the bar: an update that is still
+/// waiting, and was not put off with "Later", is announced once more.
+pub fn tell_again(state: &AppState) {
+    let Some(info) = lock(&state.updater.pending_info).clone() else { return };
+    if lock(&state.updater.seen).dismissed.contains(&info.version) {
+        return;
+    }
+    lock(&state.updater.seen).announced.insert(info.version.clone());
+    events::emit(&state.app, UPDATER_AVAILABLE, Available { info });
 }
 
 /// "Later": the version is not announced again in this run of the app.

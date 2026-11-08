@@ -76,7 +76,7 @@ pub fn slugify(name: &str) -> String {
 pub fn free_slug(base: &str, taken: &[String], exists: impl Fn(&str) -> bool) -> String {
     let mut slug = base.to_owned();
     let mut n = 2u32;
-    while slug == RESERVED_SLUG || taken.iter().any(|t| *t == slug) || exists(&slug) {
+    while slug == RESERVED_SLUG || taken.contains(&slug) || exists(&slug) {
         slug = format!("{base}-{n}");
         n += 1;
     }
