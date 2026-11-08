@@ -1,0 +1,53 @@
+[package]
+name = "multi-claude"
+description = "Run Claude Code on multiple Claude accounts side by side"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "multi_claude_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mc-core = { path = "../crates/mc-core" }
+tauri = { version = "2", features = ["tray-icon", "image-ico", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+regex.workspace = true
+uuid.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rand.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
+portable-pty = "0.9"
+notify = "8"
+notify-debouncer-mini = "0.6"
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+trash = "5"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+dirs = "6"
+log = "0.4"
+env_logger = "0.11"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+junction = "1"
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile.workspace = true
