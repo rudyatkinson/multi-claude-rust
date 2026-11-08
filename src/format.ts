@@ -1,4 +1,4 @@
-const PLAN_LABELS: Record<string, string> = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise', free: 'Free' }
+const PLAN_LABELS: Record<string, string> = { ultra: 'Ultra', max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise', free: 'Free' }
 
 // English month names with a 24-hour clock
 const LOCALE = 'en-GB'

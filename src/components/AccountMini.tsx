@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import { hasFiveHourRow } from './UsageBar'
 import type { ProfileView, UsageWindow } from '@shared/types'
 import { accountInitials, countdown, usageView } from '../format'
 import { toggleSidebar, useStore } from '../store'
@@ -16,7 +17,11 @@ export function AccountMini({ profile }: { profile: ProfileView }) {
   // same rows as the full card; a token account without data has none
   const limits: [string, UsageWindow | undefined][] =
     loggedIn && (hasUsage || profile.auth !== 'token')
-      ? [['5h', usage?.fiveHour], ['Week', usage?.sevenDay], ...(usage?.models ?? []).map((m): [string, UsageWindow] => [m.name, m])]
+      ? [
+          ...(hasFiveHourRow(usage) ? [['5h', usage?.fiveHour] as [string, UsageWindow | undefined]] : []),
+          ['Week', usage?.sevenDay] as [string, UsageWindow | undefined],
+          ...(usage?.models ?? []).map((m): [string, UsageWindow] => [m.name, m])
+        ]
       : []
 
   const lines = limits.map(([label, window]) => {

@@ -98,6 +98,9 @@ pub fn suggest_account<P: AccountRef>(
     struct Candidate<'a> {
         profile_id: &'a str,
         five_hour_pct: Option<i64>,
+        /// What the 5-hour number counts for in the order: a plan without a 5-hour limit (Ultra)
+        /// reports weekly numbers only, and no limit counts as all the room.
+        five_rank: Option<i64>,
         week_pct: Option<i64>,
     }
     let mut candidates: Vec<Candidate> = profiles
@@ -105,16 +108,19 @@ pub fn suggest_account<P: AccountRef>(
         .filter(|p| p.account_id() != exclude_id && p.logged_in() && used_up(usage.get(p.account_id()), now, model).is_none())
         .map(|p| {
             let state = usage.get(p.account_id());
+            let five_hour_pct = state.and_then(|s| s.five_hour.as_ref()).map(|w| usage_view(w, now).pct);
+            let has_weekly = state.is_some_and(|s| s.seven_day.is_some() || s.models.as_ref().is_some_and(|m| !m.is_empty()));
             Candidate {
                 profile_id: p.account_id(),
-                five_hour_pct: state.and_then(|s| s.five_hour.as_ref()).map(|w| usage_view(w, now).pct),
+                five_hour_pct,
+                five_rank: if five_hour_pct.is_none() && has_weekly { Some(0) } else { five_hour_pct },
                 week_pct: state.and_then(|s| s.seven_day.as_ref()).map(|w| usage_view(w, now).pct),
             }
         })
         .collect();
     // unknown counts as worse than any known number; the week breaks ties
     let rank = |pct: Option<i64>| pct.unwrap_or(101);
-    candidates.sort_by(|a, b| rank(a.five_hour_pct).cmp(&rank(b.five_hour_pct)).then(rank(a.week_pct).cmp(&rank(b.week_pct))));
+    candidates.sort_by(|a, b| rank(a.five_rank).cmp(&rank(b.five_rank)).then(rank(a.week_pct).cmp(&rank(b.week_pct))));
     candidates.first().map(|best| Suggestion { profile_id: best.profile_id.to_string(), five_hour_pct: best.five_hour_pct })
 }
 
@@ -250,6 +256,19 @@ mod tests {
         // only an account without numbers is left
         assert_eq!(suggest_account(&profiles[3..], &usage, NOW, "main", None), suggestion("token", None));
         assert_eq!(suggest_account(&profiles[..1], &usage, NOW, "main", None), None);
+    }
+
+    #[test]
+    fn an_account_without_a_five_hour_limit_counts_as_having_all_the_room() {
+        // an Ultra account reports weekly numbers only; it goes before an account at 12% of its 5-hour limit
+        let profiles = [account("main", true), account("ultra", true), account("emir", true)];
+        let mut usage = BTreeMap::from([("ultra".to_string(), state(None, Some(40.0))), ("emir".to_string(), state(Some(12.0), None))]);
+        let best = suggest_account(&profiles, &usage, NOW, "main", None).unwrap();
+        assert_eq!(best.profile_id, "ultra");
+        assert_eq!(best.five_hour_pct, None);
+        // without any numbers at all the account still comes last
+        usage.remove("ultra");
+        assert_eq!(suggest_account(&profiles, &usage, NOW, "main", None).unwrap().profile_id, "emir");
     }
 
     #[test]

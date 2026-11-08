@@ -85,15 +85,18 @@ export function NewSessionPopover({ groupId }: { groupId: string }) {
       {accounts.length === 0 && <div className="muted small">Log in to an account on the left first.</div>}
       <div className="chips">
         {accounts.map((account) => {
-          // the 5-hour limit is what decides whether the account can take another session now
-          const session = usage[account.id]?.fiveHour
-          const view = session ? usageView(session, now) : null
+          // the 5-hour limit is what decides whether the account can take another session now;
+          // a plan without one (Ultra) shows its weekly limit instead
+          const state = usage[account.id]
+          const session = state?.fiveHour
+          const view = session ? usageView(session, now) : state?.sevenDay ? usageView(state.sevenDay, now) : null
+          const limitName = session ? '5-hour' : 'weekly'
           return (
             <button
               key={account.id}
               className={`chip${account.id === selected?.id ? ' selected' : ''}`}
               style={{ '--accent': account.color } as CSSProperties}
-              title={[account.account?.email, view && `5-hour limit ${view.pct}% used`].filter(Boolean).join('\n')}
+              title={[account.account?.email, view && `${limitName} limit ${view.pct}% used`].filter(Boolean).join('\n')}
               onClick={() => setPicked(account.id)}
             >
               <span className="dot" />

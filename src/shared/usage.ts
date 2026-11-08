@@ -67,15 +67,19 @@ export function suggestAccount(
     .filter((p) => p.id !== excludeId && p.account?.loggedIn && !usedUp(usage[p.id], now, model))
     .map((p) => {
       const state = usage[p.id]
+      const fiveHourPct = state?.fiveHour ? usageView(state.fiveHour, now).pct : undefined
+      // a plan without a 5-hour limit (Ultra) reports weekly numbers only: no limit counts as all the room
+      const noFiveHourLimit = fiveHourPct === undefined && Boolean(state?.sevenDay || state?.models?.length)
       return {
         profileId: p.id,
-        fiveHourPct: state?.fiveHour ? usageView(state.fiveHour, now).pct : undefined,
+        fiveHourPct,
+        fiveRank: noFiveHourLimit ? 0 : fiveHourPct,
         weekPct: state?.sevenDay ? usageView(state.sevenDay, now).pct : undefined
       }
     })
   // unknown counts as worse than any known number; the week breaks ties
   const rank = (pct: number | undefined): number => pct ?? 101
-  candidates.sort((a, b) => rank(a.fiveHourPct) - rank(b.fiveHourPct) || rank(a.weekPct) - rank(b.weekPct))
+  candidates.sort((a, b) => rank(a.fiveRank) - rank(b.fiveRank) || rank(a.weekPct) - rank(b.weekPct))
   const best = candidates[0]
   return best ? { profileId: best.profileId, fiveHourPct: best.fiveHourPct } : null
 }
