@@ -7,6 +7,23 @@ pub mod error;
 pub mod events;
 pub mod state;
 
+// Phase 1 packages
+pub mod claude_binary;
+pub mod claude_cli;
+pub mod config_store;
+pub mod hook_server;
+pub mod launchers;
+pub mod limit_log;
+pub mod mcp_servers;
+pub mod paths;
+pub mod profiles;
+pub mod session_alerts;
+pub mod sessions;
+pub mod sharing;
+pub mod tab_store;
+pub mod token_vault;
+pub mod usage;
+
 use tauri::Manager;
 
 /// Builds and runs the Tauri application. Called from `main.rs`.
