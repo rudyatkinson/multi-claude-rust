@@ -31,4 +31,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: cargo build --workspace
       - run: cargo test --workspace

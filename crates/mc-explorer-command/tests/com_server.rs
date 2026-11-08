@@ -16,11 +16,24 @@ const CLSID: GUID = GUID::from_u128(0xE00837FA_9B7A_49E7_B33B_0115A2B2C52E);
 type GetClassObject = unsafe extern "system" fn(*const GUID, *const GUID, *mut *mut c_void) -> HRESULT;
 type CanUnloadNow = unsafe extern "system" fn() -> HRESULT;
 
-/// The DLL cargo built for this test run.
+/// The DLL of this crate. `cargo test` compiles the library for the test harness but not the
+/// `cdylib` artifact, so on a fresh target (CI) the DLL is built here first, with the same profile.
 fn built_dll() -> PathBuf {
     let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-    let candidates = [deps.join("mc_explorer_command.dll"), deps.parent().unwrap().join("mc_explorer_command.dll")];
-    candidates.into_iter().find(|p| p.is_file()).expect("cargo builds the DLL before the tests")
+    let profile_dir = deps.parent().unwrap().to_path_buf();
+    let candidates = [deps.join("mc_explorer_command.dll"), profile_dir.join("mc_explorer_command.dll")];
+    if let Some(found) = candidates.iter().find(|p| p.is_file()) {
+        return found.clone();
+    }
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let mut build = std::process::Command::new(env!("CARGO"));
+    build.arg("build").arg("--manifest-path").arg(&manifest).arg("--lib");
+    if profile_dir.file_name().is_some_and(|name| name == "release") {
+        build.arg("--release");
+    }
+    let status = build.status().expect("cargo runs");
+    assert!(status.success(), "building the DLL failed");
+    candidates.into_iter().find(|p| p.is_file()).expect("cargo built the DLL")
 }
 
 /// Takes a string the DLL allocated.
