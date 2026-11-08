@@ -19,7 +19,8 @@ use std::time::Duration;
 use mc_core::error::AppResult;
 use mc_core::layout::{active_id_of, deserialize, flatten, parse_saved_layout, remap_saved, serialize};
 use mc_core::types::{
-    Layout, ResumeConversation, RestorePlan, RestoreRequest, SavedLayout, SavedNode, SavedTab, SavedTabs,
+    Layout, PanelKind, ResumeConversation, RestorePlan, RestoreRequest, SavedEntry, SavedLayout, SavedNode, SavedTab,
+    SavedTabs,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -99,7 +100,7 @@ impl TabStore {
 
     /// Writes these tabs at once (`saveTabs`), in place of any save that is waiting. Does nothing
     /// once the app is quitting.
-    pub fn save(&self, tabs: &[SavedTab], active: i64, layout: Option<SavedLayout>) -> AppResult<()> {
+    pub fn save(&self, tabs: &[SavedEntry], active: i64, layout: Option<SavedLayout>) -> AppResult<()> {
         let mut saves = lock(&self.inner.saves);
         if saves.quitting {
             return Ok(());
@@ -134,7 +135,8 @@ impl TabStore {
     }
 
     /// [`schedule_save`](Self::schedule_save) of these open tabs, arranged as the layout the store
-    /// keeps: what `persistTabs` did whenever the sessions or the layout changed.
+    /// keeps, with the panels that layout has: what `persistTabs` did whenever the sessions or the
+    /// layout changed.
     pub fn persist(&self, open: &[(String, SavedTab)]) {
         let saved = snapshot(&lock(&self.inner.layout), open);
         self.schedule_save(saved);
@@ -217,29 +219,48 @@ fn read_json(file: &Path) -> Option<Value> {
     serde_json::from_str(&String::from_utf8_lossy(&bytes)).ok()
 }
 
+/// One entry of the file (see [`SavedEntry`]): a session needs an account and a folder, a panel
+/// one that this version knows; anything else is dropped.
+fn read_entry(entry: &Value) -> Option<SavedEntry> {
+    match entry.get("kind") {
+        None => {}
+        Some(Value::String(kind)) if kind == "session" => {}
+        Some(Value::String(kind)) if kind == "panel" => {
+            return PanelKind::ALL.into_iter().find(|p| entry.get("panel").and_then(Value::as_str) == Some(p.name())).map(SavedEntry::Panel);
+        }
+        Some(_) => return None,
+    }
+    let (Some(profile_id), Some(cwd)) = (text(entry.get("profileId")), text(entry.get("cwd"))) else { return None };
+    Some(SavedEntry::Session(SavedTab {
+        profile_id,
+        cwd,
+        claude_session_id: text(entry.get("claudeSessionId")),
+        transcript_path: text(entry.get("transcriptPath")),
+        name: text(entry.get("name")),
+    }))
+}
+
 /// `loadTabs`: the tabs of the file. Entries without an account or a folder are dropped, empty
 /// strings count as missing, and the active index and the layout follow the entries that stay.
+/// Panel entries stay; a panel is in the file once (a second entry of it is dropped).
 pub fn load_tabs(file: &Path) -> SavedTabs {
     let Some(raw) = read_json(file) else { return SavedTabs::default() };
     let Some(entries) = raw.get("tabs").and_then(Value::as_array) else { return SavedTabs::default() };
     let raw_active = raw.get("active").and_then(Value::as_f64);
-    let mut tabs = Vec::new();
+    let mut tabs: Vec<SavedEntry> = Vec::new();
     let mut active = -1;
     // where each entry of the file ended up, for the layout that refers to them by position
     let mut moved: HashMap<i64, i64> = HashMap::new();
     for (index, entry) in entries.iter().enumerate() {
-        let (Some(profile_id), Some(cwd)) = (text(entry.get("profileId")), text(entry.get("cwd"))) else { continue };
+        let Some(entry) = read_entry(entry) else { continue };
+        if entry.panel().is_some() && tabs.contains(&entry) {
+            continue;
+        }
         if raw_active == Some(index as f64) {
             active = tabs.len() as i64;
         }
         moved.insert(index as i64, tabs.len() as i64);
-        tabs.push(SavedTab {
-            profile_id,
-            cwd,
-            claude_session_id: text(entry.get("claudeSessionId")),
-            transcript_path: text(entry.get("transcriptPath")),
-            name: text(entry.get("name")),
-        });
+        tabs.push(entry);
     }
     let layout = raw
         .get("layout")
@@ -278,19 +299,26 @@ fn write_json_atomic(file: &Path, data: &impl Serialize) -> AppResult<()> {
 
 /// What `saveTabsNow` wrote: the open tabs (session id, tab) in the order they are seen in the
 /// layout, so that a version without areas still shows them in that order; tabs the layout does
-/// not have go last, in their own order.
+/// not have go last, in their own order. The panel tabs of the layout are saved where they are;
+/// they are not sessions, so the layout's own tab ids are what tells of them.
 pub fn snapshot(layout: &Layout, open: &[(String, SavedTab)]) -> SavedTabs {
     let seen = flatten(layout);
-    let rank = |id: &str| seen.iter().position(|s| *s == id).unwrap_or(seen.len());
-    let mut sorted: Vec<&(String, SavedTab)> = open.iter().collect();
-    sorted.sort_by_key(|(id, _)| rank(id));
-    let ids: Vec<&str> = sorted.iter().map(|(id, _)| id.as_str()).collect();
-    let active = active_id_of(layout).and_then(|a| ids.iter().position(|id| *id == a)).map_or(-1, |i| i as i64);
-    SavedTabs {
-        tabs: sorted.iter().map(|(_, tab)| tab.clone()).collect(),
-        active,
-        layout: serialize(layout, &ids),
+    let mut entries: Vec<(&str, SavedEntry)> = Vec::with_capacity(open.len());
+    for &id in &seen {
+        if let Some(kind) = PanelKind::of_tab(id) {
+            entries.push((id, SavedEntry::Panel(kind)));
+        } else if let Some((_, tab)) = open.iter().find(|(open_id, _)| open_id == id) {
+            entries.push((id, SavedEntry::Session(tab.clone())));
+        }
     }
+    for (id, tab) in open {
+        if !seen.contains(&id.as_str()) {
+            entries.push((id, SavedEntry::Session(tab.clone())));
+        }
+    }
+    let ids: Vec<&str> = entries.iter().map(|(id, _)| *id).collect();
+    let active = active_id_of(layout).and_then(|a| ids.iter().position(|id| *id == a)).map_or(-1, |i| i as i64);
+    SavedTabs { layout: serialize(layout, &ids), tabs: entries.into_iter().map(|(_, entry)| entry).collect(), active }
 }
 
 // ---------- restoring ----------
@@ -315,6 +343,8 @@ pub fn folder_exists(cwd: &str) -> bool {
 
 /// `planRestore`: which sessions to start for the saved tabs. Tabs whose account or folder is gone
 /// are dropped; a tab resumes its conversation when that exists on disk, else it starts fresh.
+/// Panels need nothing started: they are kept, each once, and come after the sessions in the
+/// plan's layout (see [`RestorePlan`]).
 pub fn plan_restore(
     saved: &SavedTabs,
     profile_exists: impl Fn(&str) -> bool,
@@ -322,16 +352,24 @@ pub fn plan_restore(
     has_transcript: impl Fn(&SavedTab) -> bool,
 ) -> RestorePlan {
     let mut requests = Vec::new();
-    let mut active = -1;
-    let mut moved: HashMap<i64, i64> = HashMap::new();
-    for (index, tab) in saved.tabs.iter().enumerate() {
+    let mut panels: Vec<PanelKind> = Vec::new();
+    // where each saved tab went: into `requests` (Ok) or into `panels` (Err), by position
+    let mut moved: HashMap<i64, Result<usize, usize>> = HashMap::new();
+    for (index, entry) in saved.tabs.iter().enumerate() {
+        let tab = match entry {
+            SavedEntry::Panel(kind) => {
+                if !panels.contains(kind) {
+                    moved.insert(index as i64, Err(panels.len()));
+                    panels.push(*kind);
+                }
+                continue;
+            }
+            SavedEntry::Session(tab) => tab,
+        };
         if !profile_exists(&tab.profile_id) || !folder_exists(&tab.cwd) {
             continue;
         }
-        if index as i64 == saved.active {
-            active = requests.len() as i64;
-        }
-        moved.insert(index as i64, requests.len() as i64);
+        moved.insert(index as i64, Ok(requests.len()));
         let resume = tab
             .claude_session_id
             .as_ref()
@@ -339,8 +377,11 @@ pub fn plan_restore(
             .map(|id| ResumeConversation { id: id.clone() });
         requests.push(RestoreRequest { profile_id: tab.profile_id.clone(), cwd: tab.cwd.clone(), resume, name: tab.name.clone() });
     }
-    let layout = saved.layout.as_ref().and_then(|layout| remap_saved(layout, |index| moved.get(&index).copied()));
-    RestorePlan { requests, active, layout }
+    let sessions = requests.len();
+    let position = |index: i64| moved.get(&index).map(|at| at.map_or_else(|panel| sessions + panel, |request| request) as i64);
+    let active = position(saved.active).unwrap_or(-1);
+    let layout = saved.layout.as_ref().and_then(|layout| remap_saved(layout, position));
+    RestorePlan { requests, active, layout, panels }
 }
 
 /// [`plan_restore`] against the disk, as `restoreTabs` called it: `config_dir_of` gives the
@@ -354,14 +395,16 @@ pub fn plan_restore_on_disk(saved: &SavedTabs, config_dir_of: impl Fn(&str) -> O
 }
 
 /// The layout restored tabs come back in (end of `restoreTabs`). `started[i]` is the session
-/// started for `plan.requests[i]`, if it started; `live` is every session there is now. A file
-/// without areas gives one area with the remembered tab in front.
+/// started for `plan.requests[i]`, if it started; `live` is every session there is now. The
+/// plan's panels come back as their `panel:*` tabs. A file without areas gives one area with the
+/// remembered tab in front.
 pub fn restored_layout(plan: &RestorePlan, started: &[Option<String>], live: &[String]) -> Layout {
-    let flat = SavedLayout {
-        root: SavedNode::Group { tabs: (0..plan.requests.len() as i64).collect(), active: plan.active },
-        focused: 0,
-    };
-    deserialize(plan.layout.as_ref().unwrap_or(&flat), started, live)
+    let ids: Vec<Option<String>> = (0..plan.requests.len())
+        .map(|i| started.get(i).cloned().flatten())
+        .chain(plan.panels.iter().map(|kind| Some(kind.tab_id())))
+        .collect();
+    let flat = SavedLayout { root: SavedNode::Group { tabs: (0..ids.len() as i64).collect(), active: plan.active }, focused: 0 };
+    deserialize(plan.layout.as_ref().unwrap_or(&flat), &ids, live)
 }
 
 #[cfg(test)]
@@ -380,6 +423,19 @@ mod tests {
 
     fn named(profile_id: &str, cwd: &str, name: &str) -> SavedTab {
         SavedTab { name: Some(name.into()), ..tab(profile_id, cwd) }
+    }
+
+    /// Session entries of the file.
+    fn entries(tabs: impl IntoIterator<Item = SavedTab>) -> Vec<SavedEntry> {
+        tabs.into_iter().map(SavedEntry::from).collect()
+    }
+
+    /// The folder of a session entry; the panel's name for a panel entry.
+    fn cwd_of(entry: &SavedEntry) -> &str {
+        match entry {
+            SavedEntry::Session(tab) => &tab.cwd,
+            SavedEntry::Panel(kind) => kind.name(),
+        }
     }
 
     fn saved_layout(value: Value) -> SavedLayout {
@@ -406,9 +462,9 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let file = dir.path().join("tabs.json");
             let first = SavedTab { transcript_path: Some(r"C:\t\id-1.jsonl".into()), ..with_id("main", r"C:\code\app", "id-1") };
-            let saved = SavedTabs { tabs: vec![first.clone(), tab("work", r"D:\x")], active: 1, layout: None };
+            let saved = SavedTabs { tabs: entries([first.clone(), tab("work", r"D:\x")]), active: 1, layout: None };
             save_tabs(&file, &saved).unwrap();
-            assert_eq!(load_tabs(&file), SavedTabs { tabs: vec![first, tab("work", r"D:\x")], active: 1, layout: None });
+            assert_eq!(load_tabs(&file), SavedTabs { tabs: entries([first, tab("work", r"D:\x")]), active: 1, layout: None });
         }
 
         #[test]
@@ -416,10 +472,13 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let file = dir.path().join("tabs.json");
             let saved =
-                SavedTabs { tabs: vec![named("main", r"C:\a", "Release notes"), named("main", r"C:\b", "")], active: 0, layout: None };
+                SavedTabs { tabs: entries([named("main", r"C:\a", "Release notes"), named("main", r"C:\b", "")]), active: 0, layout: None };
             save_tabs(&file, &saved).unwrap();
             let loaded = load_tabs(&file);
-            assert_eq!(loaded.tabs.iter().map(|t| t.name.as_deref()).collect::<Vec<_>>(), [Some("Release notes"), None]);
+            assert_eq!(
+                loaded.tabs.iter().map(|t| t.session().and_then(|t| t.name.as_deref())).collect::<Vec<_>>(),
+                [Some("Release notes"), None]
+            );
             let plan = plan_restore(&loaded, everything, everything, never);
             assert_eq!(plan.requests.iter().map(|r| r.name.as_deref()).collect::<Vec<_>>(), [Some("Release notes"), None]);
         }
@@ -429,7 +488,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let file = dir.path().join("tabs.json");
             let layout = saved_layout(json!({ "root": { "dir": "row", "ratio": 0.3, "first": { "tabs": [0, 2], "active": 2 }, "second": { "tabs": [1], "active": 1 } }, "focused": 1 }));
-            let tabs = vec![tab("main", r"C:\a"), tab("work", r"C:\b"), tab("main", r"C:\c")];
+            let tabs = entries([tab("main", r"C:\a"), tab("work", r"C:\b"), tab("main", r"C:\c")]);
             save_tabs(&file, &SavedTabs { tabs, active: 1, layout: Some(layout.clone()) }).unwrap();
             assert_eq!(load_tabs(&file).layout, Some(layout));
         }
@@ -480,7 +539,53 @@ mod tests {
 
             // the active index follows its tab when an entry before it is dropped
             write_raw(&file, json!({ "tabs": [{ "cwd": "no profile" }, { "profileId": "main", "cwd": r"C:\a" }], "active": 1 }));
-            assert_eq!(load_tabs(&file), SavedTabs { tabs: vec![tab("main", r"C:\a")], active: 0, layout: None });
+            assert_eq!(load_tabs(&file), SavedTabs { tabs: entries([tab("main", r"C:\a")]), active: 0, layout: None });
+        }
+
+        #[test]
+        fn keeps_panel_entries_and_drops_those_it_cannot_read() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("tabs.json");
+            // the Library is shown next to a session; the panel of a later version, a second
+            // Workflows entry and a kind that does not exist are dropped, and the layout follows
+            let layout = json!({ "root": { "dir": "row", "ratio": 0.5, "first": { "tabs": [0, 1, 2], "active": 0 }, "second": { "tabs": [3, 4, 5, 6], "active": 6 } }, "focused": 1 });
+            write_raw(
+                &file,
+                json!({
+                    "tabs": [
+                        { "profileId": "main", "cwd": r"C:\a" },
+                        { "kind": "panel", "panel": "workflows" },
+                        { "kind": "panel", "panel": "usage" },
+                        { "kind": "session", "profileId": "work", "cwd": r"C:\b" },
+                        { "kind": "panel", "panel": "workflows" },
+                        { "kind": "terminal", "profileId": "main", "cwd": r"C:\c" },
+                        { "kind": "panel", "panel": "library" }
+                    ],
+                    "active": 6,
+                    "layout": layout
+                }),
+            );
+            let loaded = load_tabs(&file);
+            assert_eq!(
+                loaded.tabs,
+                [
+                    SavedEntry::Session(tab("main", r"C:\a")),
+                    SavedEntry::Panel(PanelKind::Workflows),
+                    SavedEntry::Session(tab("work", r"C:\b")),
+                    SavedEntry::Panel(PanelKind::Library)
+                ]
+            );
+            assert_eq!(loaded.active, 3);
+            assert_eq!(
+                loaded.layout,
+                Some(saved_layout(json!({ "root": { "dir": "row", "ratio": 0.5, "first": { "tabs": [0, 1], "active": 0 }, "second": { "tabs": [2, 3], "active": 3 } }, "focused": 1 })))
+            );
+            // and it is written the way it was read: sessions without a kind
+            save_tabs(&file, &loaded).unwrap();
+            let raw: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(raw["tabs"][0], json!({ "profileId": "main", "cwd": r"C:\a" }));
+            assert_eq!(raw["tabs"][3], json!({ "kind": "panel", "panel": "library" }));
+            assert_eq!(load_tabs(&file), loaded);
         }
 
         #[test]
@@ -504,13 +609,13 @@ mod tests {
 
         fn saved() -> SavedTabs {
             SavedTabs {
-                tabs: vec![
+                tabs: entries([
                     with_id("gone", r"C:\a", "id-0"),
                     with_id("main", r"C:\a", "id-1"),
                     with_id("main", r"C:\deleted", "id-2"),
                     with_id("work", r"C:\b", "id-3"),
                     tab("work", r"C:\b"),
-                ],
+                ]),
                 active: 3,
                 layout: None,
             }
@@ -540,7 +645,30 @@ mod tests {
         #[test]
         fn has_no_active_tab_when_the_active_one_could_not_be_restored() {
             assert_eq!(plan(&SavedTabs { active: 0, ..saved() }).active, -1);
-            assert_eq!(plan(&SavedTabs::default()), RestorePlan { requests: vec![], active: -1, layout: None });
+            assert_eq!(plan(&SavedTabs::default()), RestorePlan { requests: vec![], active: -1, layout: None, panels: vec![] });
+        }
+
+        #[test]
+        fn keeps_the_panels_each_once_after_the_sessions() {
+            // a workflows tab in front between two sessions, the second of which cannot come back
+            let mut saved = saved();
+            saved.tabs.insert(2, SavedEntry::Panel(PanelKind::Workflows));
+            saved.tabs.push(SavedEntry::Panel(PanelKind::Library));
+            saved.tabs.push(SavedEntry::Panel(PanelKind::Workflows));
+            saved.active = 2;
+            // tabs 0..=7: gone, main a, workflows, main deleted, work b, work b, library, workflows
+            saved.layout = Some(saved_layout(
+                json!({ "root": { "dir": "column", "ratio": 0.5, "first": { "tabs": [0, 1, 2, 3], "active": 2 }, "second": { "tabs": [4, 5, 6, 7], "active": 6 } }, "focused": 0 }),
+            ));
+            let plan = plan(&saved);
+            assert_eq!(plan.requests.len(), 3);
+            assert_eq!(plan.panels, [PanelKind::Workflows, PanelKind::Library]);
+            // the panels are numbered after the three sessions
+            assert_eq!(plan.active, 3);
+            assert_eq!(
+                plan.layout,
+                Some(saved_layout(json!({ "root": { "dir": "column", "ratio": 0.5, "first": { "tabs": [0, 3], "active": 3 }, "second": { "tabs": [1, 2, 4], "active": 4 } }, "focused": 0 })))
+            );
         }
     }
 
@@ -562,7 +690,7 @@ mod tests {
             ("s1".to_string(), tab("p", "one")),
         ];
         let saved = snapshot(&l, &open);
-        assert_eq!(saved.tabs.iter().map(|t| t.cwd.as_str()).collect::<Vec<_>>(), ["one", "three", "two", "nine"]);
+        assert_eq!(saved.tabs.iter().map(cwd_of).collect::<Vec<_>>(), ["one", "three", "two", "nine"]);
         assert_eq!(saved.active, 2);
         assert_eq!(
             saved.layout,
@@ -581,40 +709,85 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_keeps_the_panel_tabs_of_the_layout_where_they_are() {
+        // [panel:workflows] s1 panel:usage | [panel:library] | [s2], the Workflows tab with the keyboard;
+        // panel:usage stands for a panel this version does not know: it is not saved
+        let l = layout_of(&["panel:workflows", "s1", "panel:usage", "panel:library", "s2"]);
+        let l = split_with(&l, "s2", "g1", Edge::Right).into_owned();
+        let right = groups_of(&l.root)[1].id.clone();
+        let l = split_with(&l, "panel:library", &right, Edge::Left).into_owned();
+        let l = mc_core::layout::activate(&l, "panel:workflows").into_owned();
+        let open = vec![("s2".to_string(), tab("p", "two")), ("s1".to_string(), tab("p", "one"))];
+        let saved = snapshot(&l, &open);
+        assert_eq!(saved.tabs.iter().map(cwd_of).collect::<Vec<_>>(), ["workflows", "one", "library", "two"]);
+        assert_eq!(saved.active, 0);
+        assert_eq!(
+            saved.layout,
+            Some(saved_layout(json!({ "root": { "dir": "row", "ratio": 0.5, "first": { "tabs": [0, 1], "active": 0 }, "second": { "dir": "row", "ratio": 0.5, "first": { "tabs": [2], "active": 2 }, "second": { "tabs": [3], "active": 3 } } }, "focused": 0 })))
+        );
+
+        // through the file and back: the panels are their tabs again, the sessions are the new ones
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("tabs.json");
+        save_tabs(&file, &saved).unwrap();
+        let plan = plan_restore(&load_tabs(&file), everything, everything, never);
+        assert_eq!(plan.requests.iter().map(|r| r.cwd.as_str()).collect::<Vec<_>>(), ["one", "two"]);
+        assert_eq!(plan.panels, [PanelKind::Workflows, PanelKind::Library]);
+        let back = restored_layout(&plan, &[Some("n1".into()), Some("n2".into())], &["n1".into(), "n2".into()]);
+        let groups: Vec<Vec<String>> = groups_of(&back.root).iter().map(|g| g.tabs.clone()).collect();
+        assert_eq!(groups, [vec!["panel:workflows", "n1"], vec!["panel:library"], vec!["n2"]]);
+        assert_eq!(active_id_of(&back), Some("panel:workflows"));
+
+        // a session that did not start leaves the panels in place
+        let back = restored_layout(&plan, &[None, Some("n2".into())], &["n2".into()]);
+        assert_eq!(flatten(&back), ["panel:workflows", "panel:library", "n2"]);
+        // with no session at all, the panels still come back
+        let only = plan_restore(&SavedTabs { tabs: vec![SavedEntry::Panel(PanelKind::Library)], active: 0, layout: None }, everything, everything, never);
+        assert_eq!(flatten(&restored_layout(&only, &[], &[])), ["panel:library"]);
+    }
+
+    #[test]
     fn a_file_without_areas_comes_back_as_one_area_with_the_remembered_tab_in_front() {
-        let plan = plan_restore(&SavedTabs { tabs: vec![tab("p", "a"), tab("p", "b")], active: 1, layout: None }, everything, everything, never);
+        let plan = plan_restore(&SavedTabs { tabs: entries([tab("p", "a"), tab("p", "b")]), active: 1, layout: None }, everything, everything, never);
         let back = restored_layout(&plan, &[Some("x".into()), Some("y".into())], &["x".into(), "y".into()]);
         assert_eq!(flatten(&back), ["x", "y"]);
         assert_eq!(active_id_of(&back), Some("y"));
+        // a panel in front of a file without areas
+        let tabs = vec![SavedEntry::Panel(PanelKind::Library), tab("p", "a").into()];
+        let plan = plan_restore(&SavedTabs { tabs, active: 0, layout: None }, everything, everything, never);
+        let back = restored_layout(&plan, &[Some("x".into())], &["x".into()]);
+        assert_eq!(flatten(&back), ["x", "panel:library"]);
+        assert_eq!(active_id_of(&back), Some("panel:library"));
     }
 
     #[test]
     fn saves_once_per_burst_and_never_after_quitting() {
         let dir = tempfile::tempdir().unwrap();
         let store = TabStore::new(dir.path().to_path_buf());
-        let state = |name: &str| SavedTabs { tabs: vec![tab("p", name)], active: 0, layout: None };
+        let state = |name: &str| SavedTabs { tabs: entries([tab("p", name)]), active: 0, layout: None };
+        let first = |store: &TabStore| cwd_of(&store.load().tabs[0]).to_string();
         store.schedule_save(state("first"));
         store.schedule_save(state("second"));
         // nothing before the delay
         assert!(!store.file().exists());
         std::thread::sleep(SAVE_DELAY * 3);
-        assert_eq!(store.load().tabs[0].cwd, "second");
+        assert_eq!(first(&store), "second");
 
         // flushing writes at once, and the sleeping timer then has nothing to do
         store.schedule_save(state("third"));
         store.flush_now();
-        assert_eq!(store.load().tabs[0].cwd, "third");
+        assert_eq!(first(&store), "third");
 
         // quitting writes what waits, then nothing more
         store.schedule_save(state("fourth"));
         store.quit();
-        assert_eq!(store.load().tabs[0].cwd, "fourth");
+        assert_eq!(first(&store), "fourth");
         assert!(store.is_quitting());
         store.schedule_save(state("fifth"));
         store.flush_now();
-        store.save(&[tab("p", "sixth")], 0, None).unwrap();
+        store.save(&entries([tab("p", "sixth")]), 0, None).unwrap();
         std::thread::sleep(SAVE_DELAY * 3);
-        assert_eq!(store.load().tabs[0].cwd, "fourth");
+        assert_eq!(first(&store), "fourth");
     }
 
     #[test]
@@ -642,7 +815,7 @@ mod tests {
     fn writes_pretty_json_with_a_final_newline_and_no_temporary_file_left() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("nested").join("tabs.json");
-        save_tabs(&file, &SavedTabs { tabs: vec![tab("p", "c")], active: 0, layout: None }).unwrap();
+        save_tabs(&file, &SavedTabs { tabs: entries([tab("p", "c")]), active: 0, layout: None }).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.starts_with("{\n  \"tabs\": [\n"));
         assert!(text.ends_with("}\n"));

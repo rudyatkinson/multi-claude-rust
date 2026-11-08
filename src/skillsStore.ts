@@ -3,7 +3,7 @@ import { skillKey, type SkillDetail, type SkillListing, type SkillRef } from '@s
 import { inspectSkill, parseSkill, setBody, setField, type FieldInput } from '@shared/skillText'
 import { mc } from './api'
 import { registerSection, reportUnsaved } from './library'
-import { ask, attempt, closePanel, setActive, setModal, toast, useStore } from './store'
+import { ask, attempt, setActive, setModal, toast, useStore } from './store'
 
 /** The skill in the editor: as it was read from disk, and its text as it stands now. */
 interface Draft {
@@ -24,7 +24,7 @@ interface SkillsState {
 
 /**
  * The skill manager's own state. The draft lives here and not in the panel, so that closing the
- * panel (to look at a tab underneath, say) never loses what was typed.
+ * Library's tab (or showing another tab in its area) never loses what was typed.
  */
 export const useSkills = create<SkillsState>(() => ({ listing: null, loading: false, draft: null, onDisk: null, tab: 'form', saving: false, query: '' }))
 
@@ -243,7 +243,7 @@ export async function askClaude(ref: SkillRef, profileId: string, request: strin
   const info = await attempt(mc.invoke('skills:assist', ref, profileId, request, { groupId: useStore.getState().layout.focused }))
   if (!info) return false
   setModal(null)
-  closePanel()
+  // the Library's tab stays; the session's tab comes to the front in the area that has the keyboard
   setActive(info.id)
   return true
 }

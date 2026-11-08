@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import { isActiveRun, type RunStep, type WorkflowRun } from '@shared/workflows'
 import { splitPath } from '../format'
-import { approveRun, closePanel, dismissRun, retryRun, setActive, setModal, stopRun, takeAnswer, useStore } from '../store'
+import { approveRun, dismissRun, retryRun, setActive, setModal, stopRun, takeAnswer, useStore } from '../store'
 import { focusTerminal } from '../terminal/terminalRegistry'
 
 const STEP_HINTS: Record<RunStep['state'], string> = {
@@ -15,8 +15,6 @@ const STEP_HINTS: Record<RunStep['state'], string> = {
 
 function showTab(sessionId: string | undefined): void {
   if (!sessionId || !useStore.getState().sessions.some((s) => s.id === sessionId)) return
-  // the tab may be under a panel
-  closePanel()
   setActive(sessionId)
   focusTerminal(sessionId)
 }

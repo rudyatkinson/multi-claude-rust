@@ -86,14 +86,29 @@ button:disabled {
   border-top: 1px solid var(--border);
 }
 
+/* the account button on a row of its own; the icon buttons below it, spread over the width */
+.sidebar-foot > .btn.full {
+  margin-bottom: 8px;
+}
+
 .sidebar-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 2px;
 }
 
-.sidebar-actions .btn {
-  flex: 1;
+/* the footer's buttons are larger than the small ones of the cards and panel headers */
+.icon-btn.foot-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  font-size: 20px;
+}
+
+.icon-btn.foot-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .version {
@@ -128,8 +143,11 @@ button:disabled {
   padding: 8px 0;
 }
 
+/* the seven buttons in a column, about 240 px tall */
 .sidebar.mini .sidebar-actions {
   flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
 }
 
 .sidebar.mini .alert {
@@ -295,6 +313,12 @@ button:disabled {
 .icon-btn:hover {
   background: var(--raised);
   color: var(--text);
+}
+
+/* the icons are drawn at 18 px for the sidebar footer; these buttons keep them small */
+.icon-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .icon-btn.sync {
@@ -629,7 +653,8 @@ button:disabled {
   background: var(--term-bg);
 }
 
-/* the areas: each has a tab strip on top and shows the terminal of one of its tabs below it */
+/* the areas: each has a tab strip, on top or on its left, and shows the terminal or the panel of
+   one of its tabs beside it; `--strip` is set by the workspace (44 px on top, 200 px on the left) */
 .workspace {
   --strip: 44px;
   position: relative;
@@ -839,6 +864,186 @@ body.pointer-drag.no-drop * {
 .tab-new:hover:not(:disabled) {
   background: var(--raised);
   color: var(--text);
+}
+
+/* the "+" and, while the tabs do not fit, the ▾ with their number */
+.tab-actions {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+}
+
+.tab-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.tab-more:hover,
+.tab-more.on {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.tab-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* a panel's tab: its icon where a session shows its state */
+.tab-icon {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+
+.tab-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tab.active .tab-icon {
+  color: var(--text);
+}
+
+/* what the sidebar buttons show: a workflow run under way, something unsaved in the Library */
+.tab-icon.live,
+.tab.active .tab-icon.live {
+  color: var(--brand);
+}
+
+.tab-icon.unsaved::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+/* ---------- tab strip on the left ---------- */
+
+/* a column of full-width rows; the "+" and the ▾ at its foot */
+.tabbar.side {
+  flex-direction: column;
+  width: var(--strip);
+  border-bottom: 0;
+  border-right: 1px solid var(--border);
+}
+
+.tabbar.side .tabs {
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.tabbar.side .tab {
+  width: 100%;
+  max-width: none;
+  min-height: 44px;
+  padding: 5px 6px 5px 10px;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
+}
+
+.tabbar.side .tab.active {
+  border-left-color: var(--accent);
+}
+
+.tabbar.side:not(.focused) .tab.active {
+  border-left-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.tabbar.side .tab-text {
+  flex: 1;
+}
+
+.tabbar.side .tab-rename {
+  width: 100%;
+}
+
+/* where a dragged tab would land: above or below a row */
+.tabbar.side .tab.drop-before {
+  box-shadow: inset 0 2px 0 var(--brand);
+}
+
+.tabbar.side .tab.drop-after {
+  box-shadow: inset 0 -2px 0 var(--brand);
+}
+
+.tabbar.side .tab-actions {
+  height: 34px;
+  border-top: 1px solid var(--border);
+}
+
+.tabbar.side .tab-new {
+  flex: 1;
+  width: auto;
+}
+
+/* ---------- the list of all the tabs of an area ---------- */
+
+.menu.tab-list {
+  position: fixed;
+  right: auto;
+  z-index: 41;
+  width: 300px;
+  max-width: calc(100vw - 12px);
+  max-height: min(420px, calc(100vh - 12px));
+  overflow-y: auto;
+  outline: 0;
+}
+
+.tab-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 8px;
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.tab-list-item.active {
+  background: var(--card);
+  border-left-color: var(--accent);
+}
+
+.tab-list-item .tab-text {
+  flex: 1;
+}
+
+.tab-list-item.exited .tab-title {
+  text-decoration: line-through;
+}
+
+.tab-list-item.attention .tab-title {
+  font-weight: 700;
+}
+
+/* ---------- panels in tabs ---------- */
+
+/* the body of an area whose tab in front is a panel; the panel fills it */
+.panel-host {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  background: var(--bg);
 }
 
 /* ---------- terminals ---------- */
@@ -1372,7 +1577,7 @@ body.pointer-drag.no-drop * {
 
 /* ---------- workflows ---------- */
 
-/* what holds the terminals, and the workflow designer that lies over them */
+/* what holds the areas */
 .stage {
   position: relative;
   flex: 1;
@@ -2099,6 +2304,90 @@ body.pointer-drag.no-drop * {
   height: 6px;
   border-radius: 50%;
   background: var(--amber);
+}
+
+/* a dot on the What's new button until the newest version's changes have been opened */
+.icon-btn.news {
+  position: relative;
+}
+
+.icon-btn.news::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+/* ---------- what's new ---------- */
+
+.dialog:has(.changelog) {
+  display: flex;
+  flex-direction: column;
+  width: 600px;
+}
+
+.changelog {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -20px;
+  padding: 0 20px;
+  user-select: text;
+}
+
+.changelog-release + .changelog-release {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.changelog-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.changelog-version {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.changelog-part {
+  margin-top: 8px;
+}
+
+.changelog-part-title {
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.changelog ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.changelog li {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.changelog strong {
+  font-weight: 600;
+}
+
+.changelog code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg);
+  font: 12px Consolas, 'Cascadia Mono', Menlo, monospace;
 }
 
 .sk-list {

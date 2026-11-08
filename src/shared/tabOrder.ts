@@ -13,6 +13,7 @@ export function reorder(order: readonly string[], id: string, beforeId: string |
   return rest.every((x, i) => x === order[i]) ? order : rest
 }
 
+/** Where a tab starts and ends along its strip: left and right, or top and bottom in a column of tabs. */
 export interface TabRect {
   id: string
   left: number
@@ -28,8 +29,9 @@ export interface DropTarget {
 }
 
 /**
- * Where a tab dragged to horizontal position `x` would land. `rects` are the tabs in order.
- * Left of a tab's middle means in front of it; past the last tab means the end.
+ * Where a tab dragged to position `x` along the strip would land (the vertical position in a
+ * column of tabs). `rects` are the tabs in order. Before a tab's middle means in front of it;
+ * past the last tab means the end.
  */
 export function dropTarget(rects: readonly TabRect[], x: number): DropTarget | null {
   if (rects.length === 0) return null

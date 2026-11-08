@@ -8,13 +8,19 @@ import {
   canSplit,
   cycleTab,
   emptyLayout,
+  findGroup,
+  flatten,
   focusStep,
   groupOf,
+  isPanel,
   isVisible,
   mergeAll,
   moveTab,
+  panelKindOf,
+  panelTabId,
   parseLayout,
   reconcile,
+  removeTab,
   setRatio,
   splitRoot,
   splitWith,
@@ -22,6 +28,7 @@ import {
   visibleIds,
   type Edge,
   type Layout,
+  type PanelKind,
   type Place
 } from '@shared/layout'
 import { chooseOpenTarget } from '@shared/openTarget'
@@ -60,10 +67,8 @@ export type Modal =
   | { type: 'memoryNew'; folderId: string }
   | { type: 'memoryAdopt'; folderId: string; plan: AdoptResult }
   | { type: 'instructionRule'; scopeId: string }
+  | { type: 'changelog' }
   | null
-
-/** What lies over the terminals: the workflow designer, the Library, or nothing. */
-export type Panel = 'workflows' | 'library' | null
 
 /** What a session's terminal title says, and since when it has been saying that Claude works. */
 export interface TabState extends TabStatus {
@@ -85,7 +90,7 @@ interface UiState extends Omit<AppState, 'layout'> {
   ready: boolean
   /** How the tabs are arranged: a tree of areas, each with its own tabs. This window decides it. */
   layout: Layout
-  /** The session that has the keyboard: the tab shown in the focused area. Follows `layout`. */
+  /** The tab that has the keyboard: the one shown in the focused area, a session or a panel. Follows `layout`. */
   activeId: string | null
   /** The area whose "+" opened the account and folder picker. */
   newSession: { groupId: string } | null
@@ -107,8 +112,6 @@ interface UiState extends Omit<AppState, 'layout'> {
   renamingId: string | null
   /** "Limit used up" bars the user closed, by session and limit window. */
   dismissedLimits: Record<string, true>
-  /** The panel that is open; it covers the terminals. */
-  panel: Panel
   /** The part of the Library that shows when it is open. */
   librarySection: LibrarySection
   /** The workflow shown in the designer. */
@@ -164,7 +167,6 @@ export const useStore = create<UiState>(() => ({
   tabMenu: null,
   renamingId: null,
   dismissedLimits: {},
-  panel: null,
   librarySection: 'skills',
   workflowId: null,
   sidebarCollapsed: readSidebarCollapsed(),
@@ -221,11 +223,20 @@ export function setModal(modal: Modal): void {
   set({ modal })
 }
 
-/** Gives the keyboard back to the terminal after a menu, a popover, an input or a drag had it. */
+/**
+ * Gives the keyboard back to the tab that has it after a menu, a popover, an input or a drag had
+ * it: to its terminal, or to its panel, unless a field of that panel has the keyboard already.
+ */
 export function refocus(): void {
-  const { activeId, panel } = get()
-  // a panel lies over the terminals: what is typed there must not reach a session
-  if (activeId && !panel) focusTerminal(activeId)
+  const { activeId } = get()
+  if (!activeId) return
+  if (!isPanel(activeId)) {
+    focusTerminal(activeId)
+    return
+  }
+  // not mounted yet when its tab has only just come to the front: it then takes the keyboard itself (see `Workspace`)
+  const host = document.querySelector<HTMLElement>(`.panel-host[data-tab="${activeId}"]`)
+  if (host && !host.contains(document.activeElement)) host.querySelector<HTMLElement>('.wf-panel')?.focus()
 }
 
 /** What the tab of a session is called right now. */
@@ -360,13 +371,21 @@ export function closeNewSession(): void {
   refocus()
 }
 
+/** A layout from outside without the tabs of panels this version does not know, which it could not show. */
+function knownPanelsOnly(l: Layout): Layout {
+  return flatten(l)
+    .filter((id) => isPanel(id) && !panelKindOf(id))
+    .reduce((next, id) => removeTab(next, id), l)
+}
+
 function applySessions({ sessions, layout: restored }: { sessions: SessionInfo[]; layout?: Layout }): void {
   const live = new Set(sessions.map((s) => s.id))
   disposeMissing(live)
 
   const s = get()
   // restored tabs arrive together with the areas they were in
-  const base = (restored && parseLayout(restored)) || s.layout
+  const parsed = restored && parseLayout(restored)
+  const base = parsed ? knownPanelsOnly(parsed) : s.layout
   // a closed tab hands its place to its neighbour; a restarted one keeps it under its new id
   let layout = reconcile(base, sessions)
   if (pendingActivate && groupOf(layout, pendingActivate)) {
@@ -377,13 +396,15 @@ function applySessions({ sessions, layout: restored }: { sessions: SessionInfo[]
   }
 
   const keep = <T>(record: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(record).filter(([id]) => live.has(id)))
+  // a panel's tab is no session: the list never names it
+  const tab = (id: string | undefined): boolean => id !== undefined && (live.has(id) || (isPanel(id) && !!groupOf(layout, id)))
   set({
     sessions,
     tabStatus: keep(s.tabStatus),
     attention: keep(s.attention),
-    tabMenu: s.tabMenu && live.has(s.tabMenu.id) ? s.tabMenu : null,
+    tabMenu: s.tabMenu && tab(s.tabMenu.id) ? s.tabMenu : null,
     renamingId: s.renamingId && live.has(s.renamingId) ? s.renamingId : null,
-    tabDrag: s.tabDrag && live.has(s.tabDrag) ? s.tabDrag : null
+    tabDrag: s.tabDrag && tab(s.tabDrag) ? s.tabDrag : null
   })
   setLayout(layout)
 
@@ -405,9 +426,10 @@ export async function startSession(profileId: string, cwd: string, resume?: Resu
   if (info) setActive(info.id)
 }
 
-export async function closeSession(id: string): Promise<void> {
+/** Closes a session's tab, asking first while Claude runs in it. False when that was cancelled. */
+export async function closeSession(id: string): Promise<boolean> {
   const session = get().sessions.find((s) => s.id === id)
-  if (!session) return
+  if (!session) return true
   if (session.status === 'running' && session.kind === 'claude') {
     const ok = await ask({
       title: 'Close session',
@@ -415,15 +437,26 @@ export async function closeSession(id: string): Promise<void> {
       confirmLabel: 'Close',
       danger: true
     })
-    if (!ok) return
+    if (!ok) return false
   }
   await attempt(mc.invoke('sessions:close', id))
+  return true
 }
 
-/** Closes several tabs after asking once, however many of them are still running. */
-export async function closeSessions(ids: readonly string[]): Promise<void> {
+/** Closes a tab: a session (asking first while it runs), or a panel. */
+export function closeTab(id: string): void {
+  const kind = panelKindOf(id)
+  if (kind) closePanel(kind)
+  else if (isPanel(id)) {
+    setLayout(removeTab(get().layout, id))
+    refocus()
+  } else void closeSession(id)
+}
+
+/** Closes several tabs after asking once, however many of them are still running. False when that was cancelled. */
+export async function closeSessions(ids: readonly string[]): Promise<boolean> {
   const targets = get().sessions.filter((s) => ids.includes(s.id))
-  if (targets.length === 0) return
+  if (targets.length === 0) return true
   if (targets.length === 1) return closeSession(targets[0].id)
   const running = targets.filter((s) => s.status === 'running' && s.kind === 'claude').length
   if (running > 0) {
@@ -433,10 +466,11 @@ export async function closeSessions(ids: readonly string[]): Promise<void> {
       confirmLabel: 'Close',
       danger: true
     })
-    if (!ok) return
+    if (!ok) return false
   }
   const closing = targets.map((s) => s.id)
   await attempt(mc.invoke('sessions:closeMany', closing))
+  return true
 }
 
 /** The new session takes the tab of the old one; the session list that announces it moves the view along. */
@@ -507,7 +541,7 @@ export function finishRename(id: string, name: string | null): void {
 /** Opens the search bar of the terminal that has the keyboard, or puts the keyboard back into it. */
 export function openSearch(): void {
   const { activeId, searchId } = get()
-  if (!activeId) return
+  if (!activeId || isPanel(activeId)) return
   if (searchId && searchId !== activeId) clearSearch(searchId)
   set((s) => ({ searchId: activeId, searchRequests: s.searchRequests + 1 }))
 }
@@ -546,7 +580,7 @@ export function runShortcut(action: ShortcutAction): void {
       openNewSession()
       return
     case 'close':
-      if (activeId) void closeSession(activeId)
+      if (activeId) closeTab(activeId)
       return
     case 'sidebar':
       toggleSidebar()
@@ -653,25 +687,57 @@ function applyWorkflows(saved: Workflow[]): void {
   set({ workflows: [...saved.map((w) => mine(w.id) ?? w), ...local.filter((w) => unsaved.has(w.id) && !saved.some((x) => x.id === w.id))] })
 }
 
-/** Opens a panel over the terminals, in place of the one that may be open. */
-export function openPanel(panel: Exclude<Panel, null>): void {
-  // what was typed in the designer is saved when it goes out of sight, whatever replaces it
+/** Saves what was typed in the designer now: it goes out of sight, whatever replaces it. */
+export function flushWorkflows(): void {
   for (const id of [...unsaved.keys()]) void sendWorkflow(id)
-  const { workflows, workflowId } = get()
-  set({ panel, newSession: null, tabMenu: null, workflowId: workflows.some((w) => w.id === workflowId) ? workflowId : (workflows[0]?.id ?? null) })
+}
+
+// ---------- panels: the designer and the Library, each in a tab of its own ----------
+
+/** Whether a panel's tab is the one its area shows. */
+export const isPanelShown = (layout: Layout, kind: PanelKind): boolean => visibleIds(layout).includes(panelTabId(kind))
+
+/**
+ * Brings a panel's tab to the front where it is; a panel without a tab gets one in the area that
+ * has the keyboard, right after the tab that area shows.
+ */
+export function openPanel(kind: PanelKind): void {
+  const id = panelTabId(kind)
+  const { layout, sessions, workflows, workflowId } = get()
+  set({ newSession: null, tabMenu: null })
+  if (kind === 'workflows' && !workflows.some((w) => w.id === workflowId)) set({ workflowId: workflows[0]?.id ?? null })
+  if (groupOf(layout, id)) {
+    setLayout(activate(layout, id))
+    refocus()
+    return
+  }
+  // a new tab goes where a new session's would; the sessions are listed so that their tabs stay
+  const shown = findGroup(layout, layout.focused)?.active ?? undefined
+  const placed = reconcile(layout, [...sessions.map((s) => ({ id: s.id })), { id, place: { groupId: layout.focused, afterId: shown } }])
+  // the panel takes the keyboard itself once it is on screen
+  setLayout(activate(placed, id))
+}
+
+/** Closes a panel's tab. It never asks: what is typed in the Library stays in its stores. */
+export function closePanel(kind: PanelKind): void {
+  const id = panelTabId(kind)
+  if (kind === 'workflows') flushWorkflows()
+  const { layout, tabMenu } = get()
+  if (!groupOf(layout, id)) return
+  if (tabMenu?.id === id) set({ tabMenu: null })
+  setLayout(removeTab(layout, id))
+  refocus()
+}
+
+/** The sidebar buttons: a panel on screen closes, any other opens or comes to the front. */
+export function togglePanel(kind: PanelKind): void {
+  if (isPanelShown(get().layout, kind)) closePanel(kind)
+  else openPanel(kind)
 }
 
 /** Shows another part of the Library. What is typed in the part that goes out of sight stays in its own store. */
 export function setLibrarySection(librarySection: LibrarySection): void {
   set({ librarySection })
-}
-
-/** Closes the open panel. It never asks: it is also called to show a tab that lies underneath. */
-export function closePanel(): void {
-  if (!get().panel) return
-  for (const id of [...unsaved.keys()]) void sendWorkflow(id)
-  set({ panel: null })
-  refocus()
 }
 
 export function selectWorkflow(id: string): void {
@@ -751,7 +817,8 @@ export async function runWorkflow(workflowId: string, cwd: string, task: string)
   const run = await attempt(mc.invoke('workflows:run', { workflowId, cwd, task }, { groupId: get().layout.focused }))
   if (!run) return false
   awaitTabOf(run.id)
-  set({ modal: null, panel: null })
+  // the designer's tab stays; the run's first tab comes to the front in the area that has the keyboard
+  set({ modal: null })
   return true
 }
 
@@ -813,9 +880,9 @@ function listenForShortcuts(): void {
   window.addEventListener(
     'keydown',
     (e) => {
-      const { modal, confirm, panel } = get()
-      // a panel covers the tabs these keys act on
-      if (modal || confirm || panel) return
+      const { modal, confirm } = get()
+      // a dialog takes the keys for itself
+      if (modal || confirm) return
       const action = matchShortcut(e)
       if (!action) return
       e.preventDefault()
@@ -829,7 +896,8 @@ function listenForShortcuts(): void {
   window.addEventListener(
     'wheel',
     (e) => {
-      if (!e.ctrlKey || !(e.target instanceof Element) || !e.target.closest('.workspace')) return
+      // the terminals zoom; a panel scrolls as it would anywhere else
+      if (!e.ctrlKey || !(e.target instanceof Element) || !e.target.closest('.workspace') || e.target.closest('.panel-host')) return
       // instead of scrolling the terminal
       e.preventDefault()
       e.stopPropagation()
@@ -864,8 +932,6 @@ export async function init(): Promise<void> {
   })
   mc.on('sessions:activate', ({ id }) => {
     if (!get().sessions.some((s) => s.id === id)) return
-    // the tab may be under a panel
-    closePanel()
     setActive(id)
   })
   mc.on('workflows:changed', applyWorkflows)
@@ -883,7 +949,8 @@ export async function init(): Promise<void> {
   await listening()
   const { layout: known, ...state } = await mc.invoke('app:getState')
   // after a reload the main process still knows how the tabs were arranged
-  const layout = reconcile((known && parseLayout(known)) || emptyLayout(), state.sessions)
+  const parsed = known && parseLayout(known)
+  const layout = reconcile(parsed ? knownPanelsOnly(parsed) : emptyLayout(), state.sessions)
   set({ ...state, ready: true, layout, activeId: activeIdOf(layout) })
   // from here on the main process may deliver folders that were queued while the window loaded
   await mc.invoke('app:ready')

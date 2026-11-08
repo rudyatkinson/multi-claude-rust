@@ -12,7 +12,18 @@ import {
   type WorkflowStep
 } from '@shared/workflows'
 import { followDrag } from '../pointerDrag'
-import { closePanel, createWorkflow, deleteWorkflow, duplicateWorkflow, newStep, selectWorkflow, setModal, updateWorkflow, useStore } from '../store'
+import {
+  closePanel,
+  createWorkflow,
+  deleteWorkflow,
+  duplicateWorkflow,
+  flushWorkflows,
+  newStep,
+  selectWorkflow,
+  setModal,
+  updateWorkflow,
+  useStore
+} from '../store'
 import { StepEditor, modeLabel } from './StepEditor'
 
 // the chain is laid out by these numbers, so that the lines under it can be drawn without measuring
@@ -201,7 +212,7 @@ function StepChain({ workflow, profiles, issues, selected, onSelect, onChange }:
 
 /**
  * The workflow designer: the list of workflows, the chain of steps of the one that is chosen, and
- * the settings of the step that is selected. It lies over the terminals, which keep running.
+ * the settings of the step that is selected. It is shown in its own tab (`panel:workflows`).
  */
 export function WorkflowsPanel() {
   const workflows = useStore((s) => s.workflows)
@@ -211,7 +222,8 @@ export function WorkflowsPanel() {
   const [stepId, setStepId] = useState<string | null>(null)
   const root = useRef<HTMLDivElement>(null)
 
-  const workflow = workflows.find((w) => w.id === workflowId) ?? null
+  // a tab restored from the last run has chosen nothing yet
+  const workflow = workflows.find((w) => w.id === workflowId) ?? workflows[0] ?? null
   const step = workflow?.steps.find((s) => s.id === stepId) ?? workflow?.steps[0] ?? null
   const issues = useMemo(() => (workflow ? validateWorkflow(workflow, new Set(profiles.map((p) => p.id))) : []), [workflow, profiles])
   const general = issues.filter((i) => i.stepId === undefined)
@@ -220,17 +232,15 @@ export function WorkflowsPanel() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const { modal, confirm } = useStore.getState()
-      // a dialog on top takes the key for itself
-      if (e.key === 'Escape' && !modal && !confirm) closePanel()
+      // a dialog on top takes the key for itself; a terminal beside the designer keeps its Escape
+      if (e.key === 'Escape' && !modal && !confirm && e.target instanceof Node && root.current?.contains(e.target)) closePanel('workflows')
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  // the terminal underneath must not keep the keyboard, also when nothing in here asks for it
-  useEffect(() => {
-    if (!root.current?.contains(document.activeElement)) root.current?.focus()
-  }, [])
+  // what was typed is saved when the designer goes out of sight: another tab in front, or its tab closed
+  useEffect(() => flushWorkflows, [])
 
   const changeStep = (next: WorkflowStep): void => {
     if (!workflow || !step) return
@@ -245,7 +255,7 @@ export function WorkflowsPanel() {
         <span className="wf-title">Workflows</span>
         <span className="muted">A chain of sessions, each on the account and model you choose. Every step runs in a tab of its own.</span>
         <span className="spacer" />
-        <button className="icon-btn" title="Close (Esc)" onClick={closePanel}>
+        <button className="icon-btn" title="Close (Esc)" onClick={() => closePanel('workflows')}>
           ×
         </button>
       </header>
@@ -273,7 +283,6 @@ export function WorkflowsPanel() {
                 maxLength={WORKFLOW_LIMITS.name}
                 placeholder="Name of the workflow"
                 spellCheck={false}
-                autoFocus
                 onChange={(e) => updateWorkflow({ ...workflow, name: e.target.value })}
               />
               <button className="btn" onClick={() => duplicateWorkflow(workflow.id)}>

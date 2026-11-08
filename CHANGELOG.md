@@ -7,9 +7,9 @@ This file is shown inside the app under **What's new**.
 
 ### Added
 - A **What's new** button at the bottom of the sidebar opens this changelog. A dot on the button marks a version you have not read yet.
-- **Tab overflow menu.** When an area has more tabs than fit in its strip, a `▾` button next to `+` lists them all; pick one to bring it into view.
-- **Vertical tabs.** Settings → Window → *Tab strip* puts each area's tabs in a column on its left instead of a row on top.
-- **Workflows and Library open as tabs.** They sit in an area like any session, can be dragged between areas and come back after a restart. The sidebar buttons bring the tab to the front; Escape or Ctrl+Shift+W closes it.
+- **Tab overflow menu.** When an area has more tabs than fit in its strip, a `▾` button with their number appears next to `+` and lists them all; pick one to bring it into view.
+- **Vertical tabs.** Settings → Window → **Tab strip: Left** puts each area's tabs in a column on its left instead of a row on top, with `+` and `▾` at its foot.
+- **Workflows and Library open as tabs.** They sit in an area like any session, can be split off, dragged between areas, reached with Ctrl+Tab and come back after a restart. The sidebar buttons bring the tab to the front, or close it when it is in front already; Escape or Ctrl+Shift+W closes it too.
 - The sidebar footer shows both versions: `Claude Code <version> | Multi Claude <version>`.
 
 ### Changed
@@ -29,7 +29,7 @@ This file is shown inside the app under **What's new**.
 ### Added
 - **Usage limits.** Every tab reports its turn through hooks the app adds to the session: the tab mark and the notification say whether Claude finished, asks for a permission, asks a question, presents a plan, stopped at a usage limit or ended with an error.
 - A bar under a session that ran into its limit offers **Continue on …** with the account that has the most room left. The conversation is copied over and Claude picks the task up where it stopped.
-- Settings → Accounts → *Move a conversation to another account by itself* does that without asking, within strict rules (two things must confirm the limit, at most two moves in five hours, the target needs room).
+- Settings → Accounts → **Move a conversation to another account by itself** does that without asking, within strict rules (two things must confirm the limit, at most two moves in five hours, the target needs room).
 - The app reads Claude Code's own wait at a usage limit and tells you how it ended.
 - `~/.multi-claude/limit-events.json` keeps the last twenty failed turns.
 

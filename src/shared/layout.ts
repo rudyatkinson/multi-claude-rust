@@ -8,7 +8,7 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom'
 export interface Group {
   kind: 'group'
   id: string
-  /** Session ids, in tab order. */
+  /** Tab ids, in tab order: session ids, and panel tabs (see `isPanel`). */
   tabs: string[]
   active: string | null
 }
@@ -55,6 +55,26 @@ const MAX_DEPTH = 32
 
 export function emptyLayout(): Layout {
   return { root: { kind: 'group', id: 'g1', tabs: [], active: null }, focused: 'g1', seq: 1 }
+}
+
+// ---------- panels ----------
+
+/** Tabs whose id starts with this are panels of the app, not sessions. Session ids are UUIDs. */
+export const PANEL_PREFIX = 'panel:'
+
+export const isPanel = (id: string): boolean => id.startsWith(PANEL_PREFIX)
+
+/** The panels that open as tabs: the workflow designer and the Library. */
+export type PanelKind = 'workflows' | 'library'
+
+export const PANEL_KINDS: readonly PanelKind[] = ['workflows', 'library']
+
+export const panelTabId = (kind: PanelKind): string => `${PANEL_PREFIX}${kind}`
+
+/** The panel a tab stands for; null for a session, and for a panel this version does not know. */
+export function panelKindOf(id: string): PanelKind | null {
+  const kind = id.slice(PANEL_PREFIX.length)
+  return isPanel(id) && (PANEL_KINDS as readonly string[]).includes(kind) ? (kind as PanelKind) : null
 }
 
 const clampRatio = (ratio: number): number => (Number.isFinite(ratio) ? Math.min(RATIO_MAX, Math.max(RATIO_MIN, ratio)) : 0.5)
@@ -257,6 +277,18 @@ export function setRatio(l: Layout, splitId: string, ratio: number): Layout {
   return root === l.root ? l : { ...l, root }
 }
 
+/**
+ * Takes a tab out of the layout: its area shows the tab that took its position, an area left
+ * empty folds away. For panel tabs; the tabs of sessions follow the session list (`reconcile`).
+ */
+export function removeTab(l: Layout, id: string): Layout {
+  if (!groupOf(l, id)) return l
+  return settle(
+    l,
+    mapGroups(l.root, (g) => withoutTab(g, id))
+  )
+}
+
 /** Puts every tab back into one area, in reading order. */
 export function mergeAll(l: Layout): Layout {
   const all = groupsOf(l.root)
@@ -270,17 +302,21 @@ export function mergeAll(l: Layout): Layout {
  * tab; tabs of sessions that are gone disappear, and the tab that took an active tab's position
  * is shown instead; new sessions get a tab where their `place` says, else in the group that has
  * the keyboard. Returns the same object when nothing changes.
+ *
+ * Panel tabs (`isPanel`) are never in the session list and count as alive all the same: they
+ * stay where they are until they are closed (`removeTab`).
  */
 export function reconcile(l: Layout, sessions: readonly SessionRef[]): Layout {
-  const live = new Set(sessions.map((s) => s.id))
+  const ids = new Set(sessions.map((s) => s.id))
+  const live = (id: string): boolean => ids.has(id) || isPanel(id)
   const successor = new Map(sessions.filter((s) => s.replaces).map((s) => [s.replaces!, s.id]))
 
   let root = mapGroups(l.root, (g) => {
-    if (g.tabs.every((id) => live.has(id) && !successor.has(id))) return g
+    if (g.tabs.every((id) => live(id) && !successor.has(id))) return g
     const now = g.tabs.map((id) => successor.get(id) ?? id)
-    const tabs = now.filter((id) => live.has(id))
+    const tabs = now.filter(live)
     const index = g.active === null ? -1 : g.tabs.indexOf(g.active)
-    const active = index >= 0 && live.has(now[index]) ? now[index] : fallback(tabs, now.slice(0, Math.max(index, 0)).filter((id) => live.has(id)).length)
+    const active = index >= 0 && live(now[index]) ? now[index] : fallback(tabs, now.slice(0, Math.max(index, 0)).filter(live).length)
     return { ...g, tabs, active }
   })
 
@@ -329,17 +365,32 @@ export interface Geometry {
   dividers: DividerRect[]
 }
 
+/**
+ * Where an area's tab strip is. `top` (the default): a band of height `strip` along the top of
+ * the area; `left`: a column of width `strip` along its left side. The area's body is the rest.
+ */
+export type StripSide = 'top' | 'left'
+
 export interface Metrics {
   /** Pixels between two areas. */
   gap: number
-  /** The smallest an area may get. */
+  /** The smallest an area may get. With the strip on top it is included in `minH`; a strip on the left comes on top of `minW`. */
   minW: number
   minH: number
+  /** On top when missing. */
+  stripSide?: StripSide
+  /** Width of a left strip; not used with the strip on top. */
+  strip?: number
+}
+
+/** The smallest a single area may get: a strip on the left adds its width. */
+function groupMin(m: Metrics): { w: number; h: number } {
+  return m.stripSide === 'left' ? { w: m.minW + (m.strip ?? 0), h: m.minH } : { w: m.minW, h: m.minH }
 }
 
 /** The smallest size a part of the tree needs so that each of its areas keeps its minimum. */
 export function minSize(node: Node, m: Metrics): { w: number; h: number } {
-  if (node.kind === 'group') return { w: m.minW, h: m.minH }
+  if (node.kind === 'group') return groupMin(m)
   const a = minSize(node.first, m)
   const b = minSize(node.second, m)
   return node.dir === 'row' ? { w: a.w + m.gap + b.w, h: Math.max(a.h, b.h) } : { w: Math.max(a.w, b.w), h: a.h + m.gap + b.h }
@@ -347,7 +398,8 @@ export function minSize(node: Node, m: Metrics): { w: number; h: number } {
 
 /**
  * Where each area and each divider goes, in whole pixels. The second child of a split gets what
- * the first leaves, so the parts always add up to the whole.
+ * the first leaves, so the parts always add up to the whole. The strip side only matters through
+ * `minSize`.
  */
 export function layoutRects(root: Node, w: number, h: number, m: Metrics): Geometry {
   const geometry: Geometry = { groups: [], dividers: [] }
@@ -397,33 +449,72 @@ export type Hit =
   | { kind: 'root'; edge: Edge }
 
 export interface HitOptions {
-  /** Height of a group's tab strip. */
+  /** Height (strip on top) or width (strip on the left) of a group's tab strip. */
   strip: number
+  /** On top when missing. */
+  stripSide?: StripSide
   /** Width of the band along the window's sides that stands for the whole window. */
   rootBand: number
   /** Share of an area, from each side, that means "a new area on this side". */
   edgeShare: number
 }
 
+/** The part of an area below (strip on top) or right of (strip on the left) its tab strip. */
+export function bodyRect(group: Rect, strip: number, side: StripSide = 'top'): Rect {
+  return side === 'left'
+    ? { x: group.x + strip, y: group.y, w: group.w - strip, h: group.h }
+    : { x: group.x, y: group.y + strip, w: group.w, h: group.h - strip }
+}
+
+/** The tab strip of an area. */
+export function stripRect(group: Rect, strip: number, side: StripSide = 'top'): Rect {
+  return side === 'left' ? { ...group, w: Math.min(strip, group.w) } : { ...group, h: Math.min(strip, group.h) }
+}
+
 /**
  * What a tab dropped at a point would do. The tab strips come first; then, with more than one
- * area, a band along the left, right and bottom of the window splits the whole window (the top
- * belongs to the tab strips); in an area, near a side means a new area there, the middle means
- * joining that area.
+ * area, a band along the sides of the window that the strips do not take splits the whole
+ * window; in an area, near a side means a new area there, the middle means joining that area.
+ *
+ * Strip on top: the band runs along the left, right and bottom (the top belongs to the tab
+ * strips), checked in that order. Strip on the left: a point with `x < group.x + strip` is on the
+ * strip; the band runs along the right, top and bottom (the left belongs to the strips), checked
+ * in that order; the sides of an area are measured in its body right of the strip. In both, a
+ * point as near to two sides goes to the first of left, right, top, bottom.
  */
 export function hitTest(geometry: Geometry, w: number, h: number, x: number, y: number, o: HitOptions): Hit | null {
   const group = geometry.groups.find((g) => x >= g.x && x < g.x + g.w && y >= g.y && y < g.y + g.h)
   if (!group) return null
-  if (y < group.y + o.strip) return { kind: 'strip', groupId: group.id }
+  const left = o.stripSide === 'left'
+  if (left ? x < group.x + o.strip : y < group.y + o.strip) return { kind: 'strip', groupId: group.id }
   if (geometry.groups.length > 1) {
-    if (x < o.rootBand) return { kind: 'root', edge: 'left' }
-    if (x >= w - o.rootBand) return { kind: 'root', edge: 'right' }
-    if (y >= h - o.rootBand) return { kind: 'root', edge: 'bottom' }
+    const band: [boolean, Edge][] = left
+      ? [
+          [x >= w - o.rootBand, 'right'],
+          [y < o.rootBand, 'top'],
+          [y >= h - o.rootBand, 'bottom']
+        ]
+      : [
+          [x < o.rootBand, 'left'],
+          [x >= w - o.rootBand, 'right'],
+          [y >= h - o.rootBand, 'bottom']
+        ]
+    const edge = band.find(([inside]) => inside)?.[1]
+    if (edge) return { kind: 'root', edge }
   }
-  const bodyH = group.h - o.strip
-  if (group.w <= 0 || bodyH <= 0) return { kind: 'move', groupId: group.id }
-  const fx = (x - group.x) / group.w
-  const fy = (y - group.y - o.strip) / bodyH
+  let fx: number
+  let fy: number
+  if (left) {
+    const bodyW = group.w - o.strip
+    if (bodyW <= 0 || group.h <= 0) return { kind: 'move', groupId: group.id }
+    fx = (x - group.x - o.strip) / bodyW
+    fy = (y - group.y) / group.h
+  } else {
+    const bodyH = group.h - o.strip
+    if (group.w <= 0 || bodyH <= 0) return { kind: 'move', groupId: group.id }
+    fx = (x - group.x) / group.w
+    fy = (y - group.y - o.strip) / bodyH
+  }
   const sides: [Edge, number][] = [
     ['left', fx],
     ['right', 1 - fx],
@@ -442,12 +533,12 @@ function half(box: Rect, edge: Edge): Rect {
 }
 
 /** The part of the window to highlight for a drop; a drop on a tab strip is shown in the strip itself. */
-export function previewRect(geometry: Geometry, w: number, h: number, hit: Hit, strip: number): Rect | null {
+export function previewRect(geometry: Geometry, w: number, h: number, hit: Hit, o: Pick<HitOptions, 'strip' | 'stripSide'>): Rect | null {
   if (hit.kind === 'root') return half({ x: 0, y: 0, w, h }, hit.edge)
   if (hit.kind === 'strip') return null
   const group = geometry.groups.find((g) => g.id === hit.groupId)
   if (!group) return null
-  const body = { x: group.x, y: group.y + strip, w: group.w, h: group.h - strip }
+  const body = bodyRect(group, o.strip, o.stripSide)
   return hit.kind === 'move' ? body : half(body, hit.edge)
 }
 
@@ -458,16 +549,17 @@ export function canDrop(l: Layout, sessionId: string, hit: Hit, geometry: Geomet
   if (hit.kind === 'strip') return true
   if (hit.kind === 'move') return from.id !== hit.groupId
   const row = dirOf(hit.edge) === 'row'
+  const one = groupMin(m)
   if (hit.kind === 'root') {
     if (flatten(l).length < 2) return false
     const rest = collapse(mapGroups(l.root, (g) => withoutTab(g, sessionId)))
     if (!rest) return false
     const need = minSize(rest, m)
-    return row ? w >= need.w + m.gap + m.minW : h >= need.h + m.gap + m.minH
+    return row ? w >= need.w + m.gap + one.w : h >= need.h + m.gap + one.h
   }
   if (!canSplit(l, sessionId, hit.groupId)) return false
   const box = geometry.groups.find((g) => g.id === hit.groupId)
-  return !!box && (row ? box.w >= 2 * m.minW + m.gap : box.h >= 2 * m.minH + m.gap)
+  return !!box && (row ? box.w >= 2 * one.w + m.gap : box.h >= 2 * one.h + m.gap)
 }
 
 // ---------- saving and checking ----------

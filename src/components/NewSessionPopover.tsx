@@ -35,11 +35,13 @@ export function NewSessionPopover({ groupId }: { groupId: string }) {
     const el = ref.current
     const button = document.querySelector(`[data-group="${groupId}"] .tab-new`)
     if (!el) return
-    const anchor = button?.getBoundingClientRect() ?? { left: MARGIN, bottom: MARGIN }
+    const anchor = button?.getBoundingClientRect() ?? { left: MARGIN, right: MARGIN, bottom: MARGIN }
+    // the "+" of a column strip is at its foot: the picker opens beside it, upwards
+    const side = button?.closest('.tabbar.side') != null
     const { width, height } = el.getBoundingClientRect()
     setPos({
-      left: Math.max(MARGIN, Math.min(anchor.left, window.innerWidth - width - MARGIN)),
-      top: Math.max(MARGIN, Math.min(anchor.bottom + 4, window.innerHeight - height - MARGIN))
+      left: Math.max(MARGIN, Math.min(side ? anchor.right + 4 : anchor.left, window.innerWidth - width - MARGIN)),
+      top: Math.max(MARGIN, Math.min(side ? anchor.bottom - height : anchor.bottom + 4, window.innerHeight - height - MARGIN))
     })
   }, [groupId])
 

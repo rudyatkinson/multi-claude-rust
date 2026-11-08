@@ -15,7 +15,7 @@ interface AgentsState extends DraftState<AgentDetail> {
 
 /**
  * The agent manager's own state. The draft lives here and not in the panel, so that closing the
- * panel (to look at a tab underneath, say) never loses what was typed.
+ * Library's tab (or showing another tab in its area) never loses what was typed.
  */
 export const useAgents = create<AgentsState>(() => ({ ...NO_DRAFT, listing: null, loading: false, tab: 'form', query: '' }))
 

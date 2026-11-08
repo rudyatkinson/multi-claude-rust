@@ -1,9 +1,10 @@
 import { isActiveRun } from '@shared/workflows'
-import { closePanel, openPanel, setModal, toggleSidebar, useStore } from '../store'
+import { NEWEST_VERSION, useChangelogSeen } from '../changelog'
+import { isPanelShown, setModal, toggleSidebar, togglePanel, useStore } from '../store'
 import { AccountCard } from './AccountCard'
 import { AccountMini } from './AccountMini'
 import { useUnsaved } from '../library'
-import { HistoryIcon, LibraryIcon, SidebarIcon, WorkflowIcon } from './icons'
+import { HistoryIcon, LibraryIcon, SettingsIcon, SidebarIcon, SparkleIcon, WorkflowIcon } from './icons'
 
 const NO_CLAUDE = 'claude was not found. Set its path in Settings.'
 
@@ -14,9 +15,12 @@ export function Sidebar() {
   const appVersion = useStore((s) => s.appVersion)
   const ready = useStore((s) => s.ready)
   const collapsed = useStore((s) => s.sidebarCollapsed)
-  const panel = useStore((s) => s.panel)
+  // on while the panel's tab is the one its area shows; pressing it again then closes the tab
+  const workflowsOn = useStore((s) => isPanelShown(s.layout, 'workflows'))
+  const libraryOn = useStore((s) => isPanelShown(s.layout, 'library'))
   const running = useStore((s) => s.runs.some(isActiveRun))
   const unsaved = useUnsaved((s) => Object.keys(s.items).length > 0)
+  const news = useChangelogSeen((s) => NEWEST_VERSION !== null && s.seen !== NEWEST_VERSION)
   const versions = [claude.version && `Claude Code ${claude.version.replace(/\s*\(.*\)$/, '')}`, appVersion && `Multi Claude ${appVersion}`].filter(Boolean).join(' | ')
 
   return (
@@ -34,37 +38,43 @@ export function Sidebar() {
       </div>
 
       <div className="sidebar-foot">
-        <div className="sidebar-actions">
-          <button
-            className={collapsed ? 'icon-btn' : 'btn'}
-            title={collapsed ? 'Add account' : undefined}
-            disabled={!claude.path}
-            onClick={() => setModal({ type: 'addAccount' })}
-          >
-            {collapsed ? '+' : '+ Add account'}
+        {!collapsed && (
+          <button className="btn full" disabled={!claude.path} onClick={() => setModal({ type: 'addAccount' })}>
+            + Add account
           </button>
-          <button className="icon-btn" title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (Ctrl+Shift+B)`} onClick={toggleSidebar}>
+        )}
+        <div className="sidebar-actions">
+          {collapsed && (
+            <button className="icon-btn foot-btn" title="Add account" disabled={!claude.path} onClick={() => setModal({ type: 'addAccount' })}>
+              +
+            </button>
+          )}
+          <button className="icon-btn foot-btn" title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (Ctrl+Shift+B)`} onClick={toggleSidebar}>
             <SidebarIcon />
           </button>
           <button
-            className={`icon-btn${panel === 'workflows' ? ' on' : ''}${running ? ' live' : ''}`}
+            className={`icon-btn foot-btn${workflowsOn ? ' on' : ''}${running ? ' live' : ''}`}
             title={running ? 'Workflows (one is running)' : 'Workflows: chain sessions across accounts'}
-            onClick={() => (panel === 'workflows' ? closePanel() : openPanel('workflows'))}
+            onClick={() => togglePanel('workflows')}
           >
             <WorkflowIcon />
           </button>
           <button
-            className={`icon-btn${panel === 'library' ? ' on' : ''}${unsaved ? ' unsaved' : ''}`}
+            className={`icon-btn foot-btn${libraryOn ? ' on' : ''}${unsaved ? ' unsaved' : ''}`}
             title={unsaved ? 'Library (something has unsaved changes)' : 'Library: the skills and agents Claude Code works with'}
-            onClick={() => (panel === 'library' ? closePanel() : openPanel('library'))}
+            onClick={() => togglePanel('library')}
           >
             <LibraryIcon />
           </button>
-          <button className="icon-btn" title="Find a past conversation (Ctrl+Shift+H)" onClick={() => setModal({ type: 'history' })}>
+          <button className="icon-btn foot-btn" title="Find a past conversation (Ctrl+Shift+H)" onClick={() => setModal({ type: 'history' })}>
             <HistoryIcon />
           </button>
-          <button className="icon-btn" title="Settings" onClick={() => setModal({ type: 'settings' })}>
-            ⚙
+          {/* the dot: the newest version's changes have not been opened yet */}
+          <button className={`icon-btn foot-btn${news ? ' news' : ''}`} title="What's new" onClick={() => setModal({ type: 'changelog' })}>
+            <SparkleIcon />
+          </button>
+          <button className="icon-btn foot-btn" title="Settings" onClick={() => setModal({ type: 'settings' })}>
+            <SettingsIcon />
           </button>
         </div>
         {!collapsed && versions && <div className="version">{versions}</div>}

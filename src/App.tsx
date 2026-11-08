@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { AgentNameDialog, AgentTransferDialog, NewAgentDialog } from './components/AgentDialogs'
+import { ChangelogDialog } from './components/ChangelogDialog'
 import { AddAccountWizard, ConfirmDialog, EditProfileDialog, ReplaceTokenDialog, SettingsDialog, Toasts } from './components/Dialogs'
 import { HistoryDialog } from './components/HistoryDialog'
 import { NewRuleDialog } from './components/InstructionsSection'
-import { LibraryPanel } from './components/LibraryPanel'
 import { McpDialog } from './components/McpDialog'
 import { AdoptMemoryDialog, NewMemoryDialog } from './components/MemorySection'
 import { NewSessionPopover } from './components/NewSessionPopover'
@@ -14,14 +14,12 @@ import { Sidebar } from './components/Sidebar'
 import { NewSkillDialog, SkillAssistDialog, SkillImportDialog, SkillNameDialog, SkillTransferDialog } from './components/SkillDialogs'
 import { TabMenu } from './components/TabMenu'
 import { TransferDialog } from './components/TransferDialog'
-import { WorkflowsPanel } from './components/WorkflowsPanel'
 import { Workspace } from './components/Workspace'
 import { init, useStore } from './store'
 
 export function App() {
   const modal = useStore((s) => s.modal)
   const newSession = useStore((s) => s.newSession)
-  const panel = useStore((s) => s.panel)
 
   useEffect(() => {
     void init()
@@ -33,10 +31,8 @@ export function App() {
       <main className="main">
         <RunBars />
         <div className="stage">
-          {/* a panel lies over the terminals, which stay as they are underneath */}
+          {/* the areas with their tabs: terminals, and the Workflows and Library panels */}
           <Workspace />
-          {panel === 'workflows' && <WorkflowsPanel />}
-          {panel === 'library' && <LibraryPanel />}
         </div>
       </main>
       {modal?.type === 'addAccount' && <AddAccountWizard />}
@@ -60,6 +56,7 @@ export function App() {
       {modal?.type === 'memoryNew' && <NewMemoryDialog key={modal.folderId} folderId={modal.folderId} />}
       {modal?.type === 'memoryAdopt' && <AdoptMemoryDialog key={modal.folderId} folderId={modal.folderId} plan={modal.plan} />}
       {modal?.type === 'instructionRule' && <NewRuleDialog key={modal.scopeId} scopeId={modal.scopeId} />}
+      {modal?.type === 'changelog' && <ChangelogDialog />}
       {newSession && <NewSessionPopover key={newSession.groupId} groupId={newSession.groupId} />}
       <TabMenu />
       <ConfirmDialog />

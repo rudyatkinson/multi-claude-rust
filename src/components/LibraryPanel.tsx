@@ -8,9 +8,9 @@ import { MemorySection } from './MemorySection'
 import { SkillsSection } from './SkillsSection'
 
 /**
- * The Library: what Claude Code reads from disk, a section for each kind. It lies over the
- * terminals, which keep running. A section keeps what is typed in it when another one shows or
- * the panel closes; only quitting asks about it.
+ * The Library: what Claude Code reads from disk, a section for each kind. It is shown in its own
+ * tab (`panel:library`). A section keeps what is typed in it when another one shows or the tab
+ * closes; only quitting asks about it.
  */
 export function LibraryPanel() {
   const section = useStore((s) => s.librarySection)
@@ -21,9 +21,9 @@ export function LibraryPanel() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const { modal, confirm, librarySection } = useStore.getState()
-      // a dialog on top takes the keys for itself
-      if (modal || confirm) return
-      if (e.key === 'Escape') closePanel()
+      // a dialog on top takes the keys for itself; a terminal beside the Library keeps them as well
+      if (modal || confirm || !(e.target instanceof Node) || !root.current?.contains(e.target)) return
+      if (e.key === 'Escape') closePanel('library')
       else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault()
         sectionHooks(librarySection)?.save()
@@ -38,11 +38,6 @@ export function LibraryPanel() {
       window.removeEventListener('focus', onFocus)
     }
   }, [])
-
-  // the terminal underneath must not keep the keyboard
-  useEffect(() => {
-    if (!root.current?.contains(document.activeElement)) root.current?.focus()
-  }, [section])
 
   const refresh = (): void => {
     setReading(true)
@@ -68,7 +63,7 @@ export function LibraryPanel() {
         <button className={`icon-btn${reading ? ' spinning' : ''}`} title="Read the folders again" onClick={refresh}>
           <RefreshIcon />
         </button>
-        <button className="icon-btn" title="Close (Esc)" onClick={closePanel}>
+        <button className="icon-btn" title="Close (Esc)" onClick={() => closePanel('library')}>
           ×
         </button>
       </header>

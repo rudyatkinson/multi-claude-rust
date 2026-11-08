@@ -24,7 +24,7 @@ interface InstructionsState extends DraftState<InstructionDetail> {
 
 /**
  * The instructions editor's own state. The draft lives here and not in the panel, so that
- * closing the panel never loses what was typed.
+ * closing the Library's tab never loses what was typed.
  */
 export const useInstructions = create<InstructionsState>(() => ({
   ...NO_DRAFT,

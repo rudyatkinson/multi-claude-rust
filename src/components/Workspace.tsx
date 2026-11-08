@@ -1,21 +1,29 @@
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from 'react'
 import {
+  bodyRect,
   canDrop,
+  flatten,
   groupsOf,
   hitTest,
   layoutRects,
+  panelKindOf,
+  panelTabId,
   previewRect,
   ratioAt,
+  stripRect,
   type DividerRect,
   type Geometry,
   type Hit,
+  type HitOptions,
   type Metrics,
-  type Rect
+  type PanelKind,
+  type Rect,
+  type StripSide
 } from '@shared/layout'
 import { pathsAsInput } from '@shared/paths'
 import { dropTarget, type DropTarget } from '@shared/tabOrder'
-import type { SessionInfo } from '@shared/types'
+import { tabStripOf, type SessionInfo } from '@shared/types'
 import { errorMessage } from '../api'
 import { followDrag } from '../pointerDrag'
 import {
@@ -36,13 +44,19 @@ import {
 } from '../store'
 import { fitTerminal, focusTerminal, mountTerminal, pasteText, setTerminalVisible } from '../terminal/terminalRegistry'
 import { GroupTabs, type StripMark } from './GroupTabs'
+import { LibraryPanel } from './LibraryPanel'
 import { ArrivedBar, LimitBar } from './LimitBar'
 import { SearchBar } from './SearchBar'
+import { WorkflowsPanel } from './WorkflowsPanel'
 
-/** Height of an area's tab strip; `--strip` in the stylesheet is the same number. */
-const STRIP = 44
+/**
+ * The size of an area's tab strip: the height of the row on top, the width of the column on the
+ * left. `--strip` in the stylesheet follows it (set on the workspace).
+ */
+const STRIP = { top: 44, side: 200 } as const
 const METRICS: Metrics = { gap: 1, minW: 260, minH: 170 }
-const HIT = { strip: STRIP, rootBand: 28, edgeShare: 0.25 }
+const ROOT_BAND = 28
+const EDGE_SHARE = 0.25
 // how close to an end of a tab strip a dragged tab starts scrolling it, by how much, and how often
 const SCROLL_EDGE = 48
 const SCROLL_STEP = 14
@@ -81,8 +95,7 @@ function TerminalSlot({ session, rect, focused, searching, color }: SlotProps) {
   }, [shown, session.id])
 
   useEffect(() => {
-    // not while a panel lies over the terminals: what is typed there is not for a session
-    if (focused && !useStore.getState().panel) focusTerminal(session.id)
+    if (focused) focusTerminal(session.id)
   }, [focused, session.id])
 
   const exited = session.status === 'exited'
@@ -171,6 +184,36 @@ function Divider({ divider, area }: { divider: DividerRect; area: RefObject<HTML
   )
 }
 
+/**
+ * A panel in the body of the area whose tab in front it is. The terminals of that area stay
+ * mounted underneath, hidden, as they are while another of its tabs is in front.
+ */
+function PanelHost({ kind, rect, focused }: { kind: PanelKind; rect: Rect; focused: boolean }) {
+  const host = useRef<HTMLDivElement>(null)
+  const id = panelTabId(kind)
+
+  // with the keyboard in its area the panel takes it, unless one of its own fields has it already
+  useEffect(() => {
+    const el = host.current
+    if (focused && el && !el.contains(document.activeElement)) el.querySelector<HTMLElement>('.wf-panel')?.focus()
+  }, [focused])
+
+  return (
+    <div
+      className="panel-host"
+      ref={host}
+      data-tab={id}
+      style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
+      // a click anywhere in it moves the keyboard to its area, as a click in a terminal does
+      onMouseDownCapture={() => {
+        if (!focused) setActive(id)
+      }}
+    >
+      {kind === 'workflows' ? <WorkflowsPanel /> : <LibraryPanel />}
+    </div>
+  )
+}
+
 /** What a dragged tab would do where the pointer is. */
 interface DropState {
   hit: Hit
@@ -190,17 +233,23 @@ interface FileDrop {
   preview: Rect
 }
 
-/** The areas of the window: each with its tab strip and the terminal of the tab it shows. */
+/** The areas of the window: each with its tab strip and the terminal or the panel of the tab it shows. */
 export function Workspace() {
   const sessions = useStore((s) => s.sessions)
   const profiles = useStore((s) => s.profiles)
   const layout = useStore((s) => s.layout)
   const searchId = useStore((s) => s.searchId)
   const hasAccount = useStore((s) => s.profiles.some((p) => p.account?.loggedIn))
+  const side = useStore((s) => tabStripOf(s.settings) === 'side')
   const area = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [drop, setDrop] = useState<DropState | null>(null)
   const [fileDrop, setFileDrop] = useState<FileDrop | null>(null)
+
+  const strip = side ? STRIP.side : STRIP.top
+  const stripSide: StripSide = side ? 'left' : 'top'
+  const metrics: Metrics = useMemo(() => ({ ...METRICS, stripSide, strip }), [stripSide, strip])
+  const hitOptions: HitOptions = { strip, stripSide, rootBand: ROOT_BAND, edgeShare: EDGE_SHARE }
 
   useLayoutEffect(() => {
     const el = area.current!
@@ -211,14 +260,19 @@ export function Workspace() {
     return () => observer.disconnect()
   }, [])
 
-  const geometry: Geometry = useMemo(() => layoutRects(layout.root, size.w, size.h, METRICS), [layout.root, size.w, size.h])
+  const geometry: Geometry = useMemo(() => layoutRects(layout.root, size.w, size.h, metrics), [layout.root, size.w, size.h, metrics])
   const groups = groupsOf(layout.root)
   const rectOf = new Map(geometry.groups.map((g) => [g.id, g]))
-  // the body of the area each shown session is in: its rectangle below the tab strip
+  // the area's rectangle without its tab strip
+  const bodyIn = (rect: Rect): Rect => {
+    const body = bodyRect(rect, strip, stripSide)
+    return { ...body, w: Math.max(0, body.w), h: Math.max(0, body.h) }
+  }
+  // the body of the area each shown tab is in
   const bodyOf = new Map<string, Rect>()
   for (const group of groups) {
     const rect = rectOf.get(group.id)
-    if (group.active && rect) bodyOf.set(group.active, { x: rect.x, y: rect.y + STRIP, w: rect.w, h: Math.max(0, rect.h - STRIP) })
+    if (group.active && rect) bodyOf.set(group.active, bodyIn(rect))
   }
   const focusedId = groups.find((g) => g.id === layout.focused)?.active ?? null
 
@@ -232,22 +286,26 @@ export function Workspace() {
     const el = area.current
     if (!id || !el) return null
     const box = el.getBoundingClientRect()
-    const hit = hitTest(geometry, size.w, size.h, clientX - box.left, clientY - box.top, HIT)
-    if (!hit || !canDrop(layout, id, hit, geometry, size.w, size.h, METRICS)) return null
-    if (hit.kind !== 'strip') return { hit, preview: previewRect(geometry, size.w, size.h, hit, STRIP), target: null }
-    const strip = el.querySelector<HTMLElement>(`[data-group="${hit.groupId}"] .tabs`)
-    const tabs = [...(strip?.querySelectorAll<HTMLElement>('.tab') ?? [])]
-    if (strip && scroll) {
-      const { left, right } = strip.getBoundingClientRect()
-      if (clientX < left + SCROLL_EDGE) strip.scrollLeft -= SCROLL_STEP
-      else if (clientX > right - SCROLL_EDGE) strip.scrollLeft += SCROLL_STEP
+    const hit = hitTest(geometry, size.w, size.h, clientX - box.left, clientY - box.top, hitOptions)
+    if (!hit || !canDrop(layout, id, hit, geometry, size.w, size.h, metrics)) return null
+    if (hit.kind !== 'strip') return { hit, preview: previewRect(geometry, size.w, size.h, hit, hitOptions), target: null }
+    const tabStrip = el.querySelector<HTMLElement>(`[data-group="${hit.groupId}"] .tabs`)
+    const tabs = [...(tabStrip?.querySelectorAll<HTMLElement>('.tab') ?? [])]
+    if (tabStrip && scroll) {
+      const { left, right, top, bottom } = tabStrip.getBoundingClientRect()
+      if (side) {
+        if (clientY < top + SCROLL_EDGE) tabStrip.scrollTop -= SCROLL_STEP
+        else if (clientY > bottom - SCROLL_EDGE) tabStrip.scrollTop += SCROLL_STEP
+      } else if (clientX < left + SCROLL_EDGE) tabStrip.scrollLeft -= SCROLL_STEP
+      else if (clientX > right - SCROLL_EDGE) tabStrip.scrollLeft += SCROLL_STEP
     }
+    // along the strip: left to right in a row, top to bottom in a column
     const target = dropTarget(
       tabs.map((tab) => {
-        const { left, right } = tab.getBoundingClientRect()
-        return { id: tab.dataset.id!, left, right }
+        const { left, right, top, bottom } = tab.getBoundingClientRect()
+        return side ? { id: tab.dataset.id!, left: top, right: bottom } : { id: tab.dataset.id!, left, right }
       }),
-      clientX
+      side ? clientY : clientX
     )
     return { hit, preview: null, target }
   }
@@ -265,11 +323,11 @@ export function Workspace() {
     const rect = geometry.groups.find((g) => x >= g.x && x < g.x + g.w && y >= g.y && y < g.y + g.h)
     const group = rect && groups.find((g) => g.id === rect.id)
     if (!rect || !group) return null
-    if (y < rect.y + STRIP) return { groupId: group.id, preview: { x: rect.x, y: rect.y, w: rect.w, h: STRIP } }
-    // typing paths only makes sense into a session that is running
+    if (side ? x < rect.x + strip : y < rect.y + strip) return { groupId: group.id, preview: stripRect(rect, strip, stripSide) }
+    // typing paths only makes sense into a session that is running; a panel takes none
     const session = sessions.find((s) => s.id === group.active)
     if (!session || session.kind !== 'claude' || session.status !== 'running') return null
-    return { groupId: group.id, sessionId: session.id, preview: { x: rect.x, y: rect.y + STRIP, w: rect.w, h: rect.h - STRIP } }
+    return { groupId: group.id, sessionId: session.id, preview: bodyIn(rect) }
   }
 
   /** Files dragged in from outside, as the webview reports them: with positions in physical pixels. */
@@ -373,18 +431,26 @@ export function Workspace() {
   const markFor = (groupId: string): StripMark | null =>
     drop?.hit.kind === 'strip' && drop.hit.groupId === groupId && drop.target ? { tabId: drop.target.id, side: drop.target.side } : null
 
-  const emptyBody = sessions.length === 0 ? rectOf.get(groups[0].id) : undefined
+  // no tab at all: the one area there is tells how to start
+  const emptyRect = flatten(layout).length === 0 ? rectOf.get(groups[0].id) : undefined
+  const emptyBody = emptyRect && bodyIn(emptyRect)
 
   return (
-    <div className="workspace" ref={area}>
+    <div className={`workspace${side ? ' side' : ''}`} ref={area} style={{ '--strip': `${strip}px` } as CSSProperties}>
       {groups.map((group) => {
         const rect = rectOf.get(group.id)
         return rect ? (
           <GroupTabs key={group.id} group={group} rect={rect} focused={group.id === layout.focused} mark={markFor(group.id)} onTabPointerDown={onTabPointerDown} />
         ) : null
       })}
+      {/* keyed by the panel, so that one dragged to another area keeps what it shows */}
+      {groups.map((group) => {
+        const kind = group.active ? panelKindOf(group.active) : null
+        const body = group.active ? bodyOf.get(group.active) : undefined
+        return kind && body ? <PanelHost key={group.active} kind={kind} rect={body} focused={group.id === layout.focused} /> : null
+      })}
       {emptyBody && (
-        <div className="empty" style={{ left: emptyBody.x, top: emptyBody.y + STRIP, width: emptyBody.w, height: Math.max(0, emptyBody.h - STRIP) }}>
+        <div className="empty" style={{ left: emptyBody.x, top: emptyBody.y, width: emptyBody.w, height: emptyBody.h }}>
           <div className="empty-title">No open sessions</div>
           <div className="muted">
             {hasAccount

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { FONT_SIZE, PROFILE_COLORS, type AuthKind, type ExplorerMenuStatus } from '@shared/types'
+import { FONT_SIZE, PROFILE_COLORS, tabStripOf, type AuthKind, type ExplorerMenuStatus, type TabStrip } from '@shared/types'
 import { mc } from '../api'
 import { attempt, dismissToast, mainProfileName, setActive, setModal, toast, useStore } from '../store'
 
@@ -316,6 +316,7 @@ export function SettingsDialog() {
   const [tray, setTray] = useState(settings.tray !== false)
   const [openAtLogin, setOpenAtLogin] = useState(settings.openAtLogin === true)
   const canStartWithSystem = packaged && platform !== 'linux'
+  const [tabStrip, setTabStrip] = useState<TabStrip>(tabStripOf(settings))
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault()
@@ -330,6 +331,7 @@ export function SettingsDialog() {
           limitAlerts,
           autoSwitch,
           tray,
+          tabStrip,
           // not sent from a development run, which must not register itself
           ...(canStartWithSystem ? { openAtLogin } : {})
         })
@@ -381,6 +383,17 @@ export function SettingsDialog() {
         </div>
         <div className="field">
           <span>Window</span>
+          <div className="setting-row">
+            <span className="setting-text">Tab strip</span>
+            <div className="segmented" role="radiogroup" aria-label="Tab strip">
+              <button type="button" role="radio" aria-checked={tabStrip === 'top'} className={tabStrip === 'top' ? 'selected' : ''} onClick={() => setTabStrip('top')}>
+                Top
+              </button>
+              <button type="button" role="radio" aria-checked={tabStrip === 'side'} className={tabStrip === 'side' ? 'selected' : ''} onClick={() => setTabStrip('side')}>
+                Left
+              </button>
+            </div>
+          </div>
           <label className="check">
             <input type="checkbox" checked={tray} onChange={(e) => setTray(e.target.checked)} />
             Keep running in the tray when the window is closed

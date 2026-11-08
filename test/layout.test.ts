@@ -12,23 +12,31 @@ import {
   groupOf,
   groupsOf,
   hitTest,
+  isPanel,
   layoutRects,
   mergeAll,
   minSize,
   moveTab,
+  panelKindOf,
+  panelTabId,
   parseLayout,
   parseSavedLayout,
   previewRect,
   ratioAt,
   reconcile,
   remapSaved,
+  removeTab,
   serialize,
   setRatio,
   splitRoot,
   splitWith,
   tabAt,
   visibleIds,
+  type Edge,
+  type Hit,
+  type HitOptions,
   type Layout,
+  type Metrics,
   type Node,
   type SessionRef
 } from '../src/shared/layout'
@@ -437,10 +445,10 @@ describe('drop zones', () => {
 
   it('previews the half that the new area would take', () => {
     const geo = layoutRects(row.root, W, H, metrics)
-    expect(previewRect(geo, W, H, { kind: 'split', groupId: 'g1', edge: 'right' }, 44)).toEqual({ x: 250, y: 44, w: 250, h: 600 })
-    expect(previewRect(geo, W, H, { kind: 'move', groupId: right }, 44)).toEqual({ x: 501, y: 44, w: 500, h: 600 })
-    expect(previewRect(geo, W, H, { kind: 'root', edge: 'bottom' }, 44)).toEqual({ x: 0, y: 322, w: W, h: 322 })
-    expect(previewRect(geo, W, H, { kind: 'strip', groupId: 'g1' }, 44)).toBeNull()
+    expect(previewRect(geo, W, H, { kind: 'split', groupId: 'g1', edge: 'right' }, options)).toEqual({ x: 250, y: 44, w: 250, h: 600 })
+    expect(previewRect(geo, W, H, { kind: 'move', groupId: right }, options)).toEqual({ x: 501, y: 44, w: 500, h: 600 })
+    expect(previewRect(geo, W, H, { kind: 'root', edge: 'bottom' }, options)).toEqual({ x: 0, y: 322, w: W, h: 322 })
+    expect(previewRect(geo, W, H, { kind: 'strip', groupId: 'g1' }, options)).toBeNull()
   })
 
   it('refuses drops that change nothing or leave an area too small', () => {
@@ -525,6 +533,110 @@ describe('saving a layout', () => {
     let deep: unknown = { tabs: [0], active: 0 }
     for (let i = 1; i < 40; i++) deep = { dir: 'row', ratio: 0.5, first: deep, second: { tabs: [i], active: i } }
     expect(parseSavedLayout({ root: deep })).toBeNull()
+  })
+})
+
+describe('panels', () => {
+  it('reconcile keeps panel tabs that no session has', () => {
+    const l = one('a', 'panel:usage', 'b')
+    expect(isPanel('panel:usage') && !isPanel('a')).toBe(true)
+    // the session list never names a panel
+    expect(reconcile(l, refs('a', 'b'))).toBe(l)
+    expect(picture(reconcile(l, refs('a')))).toBe('*[a] panel:usage')
+    // with every session gone, a shown panel stays, and so does an area that holds one
+    const shown = activate(l, 'panel:usage')
+    expect(picture(reconcile(shown, []))).toBe('*[panel:usage]')
+    const apart = splitWith(l, 'panel:usage', 'g1', 'right')
+    expect(picture(reconcile(apart, []))).toBe('*[panel:usage]')
+    expect(shape(reconcile(apart, refs('b')).root)).toBe('H(b,panel:usage)')
+    // a tab that merely looks like one is still a session when it lacks the prefix
+    expect(picture(reconcile(one('a', 'panel-usage'), refs('a')))).toBe('*[a]')
+  })
+
+  it('removeTab takes a panel out and shows the neighbour', () => {
+    const l = activate(one('a', 'panel:library', 'b'), 'panel:library')
+    expect(picture(removeTab(l, 'panel:library'))).toBe('*a [b]')
+    expect(removeTab(l, 'panel:workflows')).toBe(l)
+    // the area of a panel alone folds away, and the keyboard goes to an area that is left
+    const apart = splitWith(l, 'panel:library', 'g1', 'right')
+    expect(picture(apart)).toBe('a [b] | *[panel:library]')
+    const closed = removeTab(apart, 'panel:library')
+    expect(picture(closed)).toBe('*a [b]')
+    check(closed)
+    // the last tab of all leaves one empty area
+    expect(picture(removeTab(one('panel:workflows'), 'panel:workflows'))).toBe('*')
+  })
+
+  it('knows the panels of this version by their tab ids', () => {
+    expect(panelTabId('workflows')).toBe('panel:workflows')
+    expect(panelKindOf('panel:library')).toBe('library')
+    expect(panelKindOf('panel:usage')).toBeNull()
+    expect(panelKindOf('library')).toBeNull()
+  })
+})
+
+describe('strip on the left', () => {
+  const W = 1001
+  const H = 600
+  const metrics: Metrics = { gap: 1, minW: 200, minH: 120, stripSide: 'left', strip: 160 }
+  const options: HitOptions = { strip: 160, stripSide: 'left', rootBand: 24, edgeShare: 0.25 }
+  const row = splitWith(one('a', 'b', 'c'), 'c', 'g1', 'right')
+  const right = groupOf(row, 'c')!.id
+
+  it('an area needs room for its strip beside it', () => {
+    expect(minSize(one('a').root, metrics)).toEqual({ w: 360, h: 120 })
+    // with the strip on top it is the area's own minimum
+    expect(minSize(one('a').root, { gap: 1, minW: 200, minH: 120 })).toEqual({ w: 200, h: 120 })
+    const two = splitWith(one('a', 'b'), 'b', 'g1', 'right')
+    expect(minSize(two.root, metrics)).toEqual({ w: 721, h: 120 })
+    const squeezed = setRatio(two, two.root.id, 0.05)
+    const { groups, dividers } = layoutRects(squeezed.root, W, H, metrics)
+    expect(groups[0].w).toBe(360)
+    expect(dividers[0].min).toBeCloseTo(0.36)
+    expect(dividers[0].max).toBeCloseTo(0.64)
+  })
+
+  it('reads the strip column and measures the sides in the body', () => {
+    const geo = layoutRects(one('a', 'b').root, W, H, metrics)
+    const hit = (x: number, y: number): Hit | null => hitTest(geo, W, H, x, y, options)
+    const split = (edge: Edge): Hit => ({ kind: 'split', groupId: 'g1', edge })
+    expect(hit(100, 300)).toEqual({ kind: 'strip', groupId: 'g1' })
+    // the top left corner is the strip, not the top side
+    expect(hit(100, 10)).toEqual({ kind: 'strip', groupId: 'g1' })
+    expect(hit(600, 300)).toEqual({ kind: 'move', groupId: 'g1' })
+    expect(hit(170, 300)).toEqual(split('left'))
+    expect(hit(990, 300)).toEqual(split('right'))
+    expect(hit(600, 10)).toEqual(split('top'))
+    expect(hit(600, 590)).toEqual(split('bottom'))
+  })
+
+  it('with several areas, the band runs along the sides the strips do not take', () => {
+    const geo = layoutRects(row.root, W, H, metrics)
+    const hit = (x: number, y: number): Hit | null => hitTest(geo, W, H, x, y, options)
+    // the left of the window belongs to the strips
+    expect(hit(10, 300)).toEqual({ kind: 'strip', groupId: 'g1' })
+    expect(hit(995, 300)).toEqual({ kind: 'root', edge: 'right' })
+    expect(hit(800, 5)).toEqual({ kind: 'root', edge: 'top' })
+    expect(hit(800, 590)).toEqual({ kind: 'root', edge: 'bottom' })
+    // a corner goes to the right before the top
+    expect(hit(995, 5)).toEqual({ kind: 'root', edge: 'right' })
+    // the right area's strip, then its body
+    expect(hit(520, 300)).toEqual({ kind: 'strip', groupId: right })
+    expect(hit(700, 300)).toEqual({ kind: 'split', groupId: right, edge: 'left' })
+  })
+
+  it('previews and checks drops in the body', () => {
+    const geo = layoutRects(row.root, W, H, metrics)
+    expect(previewRect(geo, W, H, { kind: 'move', groupId: right }, options)).toEqual({ x: 661, y: 0, w: 340, h: 600 })
+    expect(previewRect(geo, W, H, { kind: 'split', groupId: 'g1', edge: 'right' }, options)).toEqual({ x: 330, y: 0, w: 170, h: 600 })
+    expect(previewRect(geo, W, H, { kind: 'root', edge: 'left' }, options)).toEqual({ x: 0, y: 0, w: 500.5, h: 600 })
+    // two columns with their strips do not fit in an area 500 wide; with the strip on top they would
+    const leftOfG1: Hit = { kind: 'split', groupId: 'g1', edge: 'left' }
+    expect(canDrop(row, 'a', leftOfG1, geo, W, H, metrics)).toBe(false)
+    expect(canDrop(row, 'a', leftOfG1, geo, W, H, { gap: 1, minW: 200, minH: 120 })).toBe(true)
+    expect(canDrop(row, 'a', { kind: 'split', groupId: 'g1', edge: 'bottom' }, geo, W, H, metrics)).toBe(true)
+    expect(canDrop(row, 'a', { kind: 'root', edge: 'left' }, geo, W, H, metrics)).toBe(false)
+    expect(canDrop(row, 'a', { kind: 'root', edge: 'bottom' }, geo, W, H, metrics)).toBe(true)
   })
 })
 

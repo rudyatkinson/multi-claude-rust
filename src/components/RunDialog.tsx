@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { findGroup, visibleIds } from '@shared/layout'
 import { WORKFLOW_LIMITS, preflight, promptRefs, validateWorkflow } from '@shared/workflows'
 import { errorMessage, mc } from '../api'
 import { attempt, runWorkflow, setModal, toast, useStore } from '../store'
@@ -13,10 +14,13 @@ export function RunDialog({ workflowId }: { workflowId: string }) {
   const usage = useStore((s) => s.usage)
   const now = useStore((s) => s.now)
   const recentFolders = useStore((s) => s.recentFolders)
-  // the folder of the tab that was in front is the likeliest place
+  // the folder of the session in front is the likeliest place; with the designer in front, that of
+  // a session on screen beside it, else of one behind it in its area
   const [cwd, setCwd] = useState(() => {
     const s = useStore.getState()
-    return s.sessions.find((x) => x.id === s.activeId && x.kind === 'claude')?.cwd ?? s.recentFolders[0] ?? ''
+    const candidates = [s.activeId, ...visibleIds(s.layout), ...(findGroup(s.layout, s.layout.focused)?.tabs ?? [])]
+    const session = candidates.map((id) => s.sessions.find((x) => x.id === id && x.kind === 'claude')).find((x) => x !== undefined)
+    return session?.cwd ?? s.recentFolders[0] ?? ''
   })
   const [task, setTask] = useState('')
   const [starting, setStarting] = useState(false)

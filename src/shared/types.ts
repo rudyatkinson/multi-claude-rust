@@ -148,7 +148,14 @@ export interface AppSettings {
   trayHintShown?: boolean
   /** Project folders the user added to the skill manager's list. */
   skillFolders?: string[]
+  /** Where each area's tabs are: a row on top (the default) or a column on the left. */
+  tabStrip?: TabStrip
 }
+
+export type TabStrip = 'top' | 'side'
+
+/** The tab strip setting as it is used: anything but `side` is the row on top. */
+export const tabStripOf = (settings: Pick<AppSettings, 'tabStrip'>): TabStrip => (settings.tabStrip === 'side' ? 'side' : 'top')
 
 /** `package` shows in the Windows 11 menu and the classic one; `classic` only under "Show more options". */
 export type ExplorerMenuTier = 'package' | 'classic'

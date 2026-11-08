@@ -21,7 +21,7 @@ interface MemoryState extends DraftState<MemoryDetail> {
 
 /**
  * The memory browser's own state. The draft lives here and not in the panel, so that closing the
- * panel never loses what was typed.
+ * Library's tab never loses what was typed.
  */
 export const useMemory = create<MemoryState>(() => ({ ...NO_DRAFT, listing: null, projectKey: null, folderId: null, view: null, query: '', hits: null }))
 
