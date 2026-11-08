@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::serde_util::{is_false, ms, opt_ms, px};
+use super::serde_util::{is_false, js_number, ms, opt_ms, px};
 use super::{Extra, Layout, Place, Turn, Workflow, WorkflowRun};
 
 // ---------- accounts ----------
@@ -154,6 +154,7 @@ pub const PROFILE_COLORS: [&str; 8] = ["#d97757", "#5b9bd5", "#6bbf6b", "#c678dd
 #[serde(rename_all = "camelCase")]
 pub struct UsageWindow {
     /// 0-100, with a fraction as Claude Code reports it.
+    #[serde(serialize_with = "js_number")]
     pub used_pct: f64,
     /// Epoch ms; missing when Claude Code reported no reset time.
     #[serde(default, deserialize_with = "opt_ms", skip_serializing_if = "Option::is_none")]
@@ -166,6 +167,7 @@ pub struct UsageWindow {
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsage {
     pub name: String,
+    #[serde(serialize_with = "js_number")]
     pub used_pct: f64,
     #[serde(default, deserialize_with = "opt_ms", skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<i64>,

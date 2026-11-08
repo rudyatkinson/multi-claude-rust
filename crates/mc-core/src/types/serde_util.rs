@@ -1,10 +1,20 @@
-//! Serde helpers that reproduce how the TypeScript version read its values: numbers are numbers
-//! whatever their fraction, and a file with a wrong shape in one place falls back to the default
-//! there instead of failing as a whole.
+//! Serde helpers that reproduce how the TypeScript version read and wrote its values: numbers are
+//! numbers whatever their fraction, and a file with a wrong shape in one place falls back to the
+//! default there instead of failing as a whole.
 
 use serde::de::{DeserializeOwned, Error as _};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serializer};
 use serde_json::Value;
+
+/// A float as `JSON.stringify` writes it: `12`, not `12.0`, when it has no fraction.
+pub(crate) fn js_number<S: Serializer>(value: &f64, s: S) -> Result<S::Ok, S::Error> {
+    // beyond 2^53 JavaScript writes whole floats in exponent form; leave those to serde
+    if value.fract() == 0.0 && value.abs() < 9_007_199_254_740_992.0 {
+        s.serialize_i64(*value as i64)
+    } else {
+        s.serialize_f64(*value)
+    }
+}
 
 /// For `x?: true` fields: written only when set.
 pub(crate) fn is_false(value: &bool) -> bool {

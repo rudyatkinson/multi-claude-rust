@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::serde_util::{minus_one, ok_or_none};
+use super::serde_util::{js_number, minus_one, ok_or_none};
 
 /// `row`: the first child is left of the second; `column`: it is above it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -38,6 +38,7 @@ pub struct Split {
     pub id: String,
     pub dir: Dir,
     /// Share of the first child, 0..1.
+    #[serde(serialize_with = "js_number")]
     pub ratio: f64,
     pub first: Box<Node>,
     pub second: Box<Node>,
@@ -114,6 +115,7 @@ pub enum SavedNode {
     },
     Split {
         dir: Dir,
+        #[serde(serialize_with = "js_number")]
         ratio: f64,
         first: Box<SavedNode>,
         second: Box<SavedNode>,
