@@ -118,7 +118,10 @@ export const INVOKE_PARAMS: { readonly [K in keyof IpcInvoke]: ParamNames<Parame
   'clipboard:read': [],
   'clipboard:writeText': ['text'],
   'explorerMenu:status': [],
-  'explorerMenu:set': ['enabled']
+  'explorerMenu:set': ['enabled'],
+  'updater:check': [],
+  'updater:install': [],
+  'updater:dismiss': ['version']
 }
 
 /** The Tauri command behind a channel: `profiles:create` is `profiles_create`. */

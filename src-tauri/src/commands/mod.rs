@@ -21,6 +21,7 @@ pub mod agents;
 pub mod instructions;
 pub mod memory;
 pub mod skills;
+pub mod updater;
 
 /// Defines [`handler`] and the list of the names it registers from one list of commands.
 macro_rules! registry {
@@ -139,6 +140,10 @@ registry![
     instructions::instructions_view,
     instructions::instructions_reveal,
     instructions::instructions_add_folder,
+    // Phase 4
+    updater::updater_check,
+    updater::updater_install,
+    updater::updater_dismiss,
 ];
 
 #[cfg(test)]
@@ -165,9 +170,27 @@ mod tests {
     fn every_channel_of_the_renderer_has_a_command() {
         let mut expected: Vec<String> = INVOKE_CHANNELS.iter().chain(SEND_CHANNELS.iter()).map(|c| command_name(c)).collect();
         expected.push("app_get_version".into());
+        // TODO: the updater's channels are in the renderer's INVOKE_CHANNELS, not yet in mc-core's copy of it
+        for channel in crate::updater::INVOKE_CHANNELS {
+            let name = command_name(channel);
+            if !expected.contains(&name) {
+                expected.push(name);
+            }
+        }
         expected.sort();
         let mut registered: Vec<String> = super::REGISTERED.iter().map(|s| (*s).to_owned()).collect();
         registered.sort();
         assert_eq!(registered, expected);
+    }
+
+    #[test]
+    fn the_updater_channels_are_the_renderers() {
+        let ipc = include_str!("../../../src/shared/ipc.ts");
+        let list = ipc.split("export const INVOKE_CHANNELS = [").nth(1).and_then(|rest| rest.split(']').next()).expect("INVOKE_CHANNELS in ipc.ts");
+        for channel in crate::updater::INVOKE_CHANNELS {
+            let quoted = format!("'{channel}'");
+            assert!(ipc.contains(&format!("{quoted}: (")), "{channel} is not a channel of IpcInvoke");
+            assert!(list.contains(&quoted), "{channel} is not in INVOKE_CHANNELS");
+        }
     }
 }

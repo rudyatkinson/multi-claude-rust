@@ -14,14 +14,18 @@ import { Sidebar } from './components/Sidebar'
 import { NewSkillDialog, SkillAssistDialog, SkillImportDialog, SkillNameDialog, SkillTransferDialog } from './components/SkillDialogs'
 import { TabMenu } from './components/TabMenu'
 import { TransferDialog } from './components/TransferDialog'
+import { UpdateBar, UpdateNotesDialog } from './components/UpdateBar'
 import { Workspace } from './components/Workspace'
 import { init, useStore } from './store'
+import { listenForUpdates } from './updates'
 
 export function App() {
   const modal = useStore((s) => s.modal)
   const newSession = useStore((s) => s.newSession)
 
   useEffect(() => {
+    // before `init`, which waits for every listener added so far
+    listenForUpdates()
     void init()
   }, [])
 
@@ -29,6 +33,7 @@ export function App() {
     <div className="app">
       <Sidebar />
       <main className="main">
+        <UpdateBar />
         <RunBars />
         <div className="stage">
           {/* the areas with their tabs: terminals, and the Workflows and Library panels */}
@@ -57,6 +62,7 @@ export function App() {
       {modal?.type === 'memoryAdopt' && <AdoptMemoryDialog key={modal.folderId} folderId={modal.folderId} plan={modal.plan} />}
       {modal?.type === 'instructionRule' && <NewRuleDialog key={modal.scopeId} scopeId={modal.scopeId} />}
       {modal?.type === 'changelog' && <ChangelogDialog />}
+      {modal?.type === 'updateNotes' && <UpdateNotesDialog />}
       {newSession && <NewSessionPopover key={newSession.groupId} groupId={newSession.groupId} />}
       <TabMenu />
       <ConfirmDialog />

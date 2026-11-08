@@ -30,7 +30,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "dmg"],
+    "targets": ["nsis", "app", "dmg"],
+    "createUpdaterArtifacts": true,
     "category": "DeveloperTool",
     "icon": [
       "icons/32x32.png",
@@ -54,6 +55,16 @@
     "macOS": {
       "signingIdentity": "-",
       "minimumSystemVersion": "11.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/OWNER/multi-claude-rust/releases/latest/download/latest.json"],
+      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

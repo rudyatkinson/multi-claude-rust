@@ -23,6 +23,7 @@ import type { AgentDetail, AgentListing, AgentMoved, AgentRef, AgentSaveResult }
 import type { InstructionDetail, InstructionFile, InstructionRef, InstructionSaveResult, InstructionScope, LoadStep } from './instructions'
 import type { AdoptResult, MemoryDetail, MemoryHit, MemoryListing, MemoryRef, MemorySaveResult, MemoryView } from './memory'
 import type { ImportPreview, SaveResult, SkillDetail, SkillListing, SkillMoved, SkillRef } from './skills'
+import type { UpdateInfo, UpdateProgress } from './updates'
 import type { StartRunInput, Workflow, WorkflowRun } from './workflows'
 
 /** Request/response calls (renderer -> main). */
@@ -159,6 +160,12 @@ export interface IpcInvoke {
   'clipboard:writeText': (text: string) => void
   'explorerMenu:status': () => ExplorerMenuStatus
   'explorerMenu:set': (enabled: boolean) => ExplorerMenuStatus
+  /** Looks for a newer version now; null when this one is the newest. */
+  'updater:check': () => UpdateInfo | null
+  /** Downloads the update the last check found, ends the app as quitting does, installs it and starts the new version. Returns only when that failed. */
+  'updater:install': () => void
+  /** "Later": the version is not announced again until the app starts anew. */
+  'updater:dismiss': (version: string) => void
 }
 
 /** Fire-and-forget messages (renderer -> main). */
@@ -190,6 +197,10 @@ export interface IpcEvents {
   'ui:newSession': Record<string, never>
   'workflows:changed': Workflow[]
   'runs:changed': WorkflowRun[]
+  /** A newer version was found by the check at start or the daily one; once per version and run of the app. */
+  'updater:available': { info: UpdateInfo }
+  /** How far the download of the update is. */
+  'updater:progress': UpdateProgress
 }
 
 export const INVOKE_CHANNELS = [
@@ -279,7 +290,10 @@ export const INVOKE_CHANNELS = [
   'clipboard:read',
   'clipboard:writeText',
   'explorerMenu:status',
-  'explorerMenu:set'
+  'explorerMenu:set',
+  'updater:check',
+  'updater:install',
+  'updater:dismiss'
 ] as const satisfies readonly (keyof IpcInvoke)[]
 
 export const SEND_CHANNELS = ['pty:write', 'pty:resize', 'ui:layout', 'session:attention', 'ui:unsaved'] as const satisfies readonly (keyof IpcSend)[]
@@ -295,7 +309,9 @@ export const EVENT_CHANNELS = [
   'sessions:activate',
   'ui:newSession',
   'workflows:changed',
-  'runs:changed'
+  'runs:changed',
+  'updater:available',
+  'updater:progress'
 ] as const satisfies readonly (keyof IpcEvents)[]
 
 export interface McApi {

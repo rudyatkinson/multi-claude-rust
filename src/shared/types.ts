@@ -150,6 +150,8 @@ export interface AppSettings {
   skillFolders?: string[]
   /** Where each area's tabs are: a row on top (the default) or a column on the left. */
   tabStrip?: TabStrip
+  /** Look for a new version at start and once a day. On unless set to false. */
+  checkUpdates?: boolean
 }
 
 export type TabStrip = 'top' | 'side'

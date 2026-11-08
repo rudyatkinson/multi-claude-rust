@@ -11,6 +11,7 @@ This file is shown inside the app under **What's new**.
 - **Vertical tabs.** Settings → Window → **Tab strip: Left** puts each area's tabs in a column on its left instead of a row on top, with `+` and `▾` at its foot.
 - **Workflows and Library open as tabs.** They sit in an area like any session, can be split off, dragged between areas, reached with Ctrl+Tab and come back after a restart. The sidebar buttons bring the tab to the front, or close it when it is in front already; Escape or Ctrl+Shift+W closes it too.
 - The sidebar footer shows both versions: `Claude Code <version> | Multi Claude <version>`.
+- **Automatic updates from GitHub Releases.** The app looks for a new version at start and once a day. A bar above the tabs then offers **What's new**, **Install and restart** and **Later**; installing ends the running sessions and their tabs come back after the restart. After **Later**, the `↑` next to the version in the sidebar footer brings the bar back. Settings → Window → **Check for updates automatically** turns the daily check off, and **Check now** looks right away.
 
 ### Changed
 - **Rewritten in Rust.** The backend that used to run on Electron and Node is now a Rust program on Tauri 2 with the system WebView. The installer is a fraction of its former size, the app starts faster and uses far less memory. Accounts, tabs, workflows and settings in `~/.multi-claude` are read as they are; nothing has to be migrated.

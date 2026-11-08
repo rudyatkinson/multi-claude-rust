@@ -4,6 +4,7 @@ import { isPanelShown, setModal, toggleSidebar, togglePanel, useStore } from '..
 import { AccountCard } from './AccountCard'
 import { AccountMini } from './AccountMini'
 import { useUnsaved } from '../library'
+import { showUpdateBar, useUpdate } from '../updates'
 import { HistoryIcon, LibraryIcon, SettingsIcon, SidebarIcon, SparkleIcon, WorkflowIcon } from './icons'
 
 const NO_CLAUDE = 'claude was not found. Set its path in Settings.'
@@ -21,6 +22,7 @@ export function Sidebar() {
   const running = useStore((s) => s.runs.some(isActiveRun))
   const unsaved = useUnsaved((s) => Object.keys(s.items).length > 0)
   const news = useChangelogSeen((s) => NEWEST_VERSION !== null && s.seen !== NEWEST_VERSION)
+  const update = useUpdate((s) => s.info)
   const versions = [claude.version && `Claude Code ${claude.version.replace(/\s*\(.*\)$/, '')}`, appVersion && `Multi Claude ${appVersion}`].filter(Boolean).join(' | ')
 
   return (
@@ -77,7 +79,17 @@ export function Sidebar() {
             <SettingsIcon />
           </button>
         </div>
-        {!collapsed && versions && <div className="version">{versions}</div>}
+        {!collapsed && (versions || update) && (
+          <div className="version">
+            {versions}
+            {/* a newer version is known: shows its bar again after "Later" */}
+            {update && (
+              <button className="version-update" title={`Multi Claude ${update.version} is available`} onClick={showUpdateBar}>
+                ↑ {update.version}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </aside>
   )

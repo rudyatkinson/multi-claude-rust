@@ -68,6 +68,8 @@ export type Modal =
   | { type: 'memoryAdopt'; folderId: string; plan: AdoptResult }
   | { type: 'instructionRule'; scopeId: string }
   | { type: 'changelog' }
+  /** The changes of the version the update bar offers. */
+  | { type: 'updateNotes' }
   | null
 
 /** What a session's terminal title says, and since when it has been saying that Claude works. */

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { FONT_SIZE, PROFILE_COLORS, tabStripOf, type AuthKind, type ExplorerMenuStatus, type TabStrip } from '@shared/types'
 import { mc } from '../api'
 import { attempt, dismissToast, mainProfileName, setActive, setModal, toast, useStore } from '../store'
+import { checkNow, useUpdate } from '../updates'
 
 export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose(): void }) {
   useEffect(() => {
@@ -299,6 +300,22 @@ function ExplorerMenuSetting() {
   )
 }
 
+/** "Check now", and what is known about a newer version. */
+function UpdateCheck() {
+  const appVersion = useStore((s) => s.appVersion)
+  const info = useUpdate((s) => s.info)
+  const checking = useUpdate((s) => s.checking)
+  const installing = useUpdate((s) => s.installing)
+  return (
+    <div className="setting-row">
+      <span className="setting-text">{info ? `Multi Claude ${info.version} is available.` : `This is Multi Claude ${appVersion ?? ''}.`}</span>
+      <button type="button" className="btn" disabled={checking || installing} onClick={() => void checkNow()}>
+        {checking ? 'Checking…' : 'Check now'}
+      </button>
+    </div>
+  )
+}
+
 export function SettingsDialog() {
   const settings = useStore((s) => s.settings)
   const claude = useStore((s) => s.claude)
@@ -317,6 +334,7 @@ export function SettingsDialog() {
   const [openAtLogin, setOpenAtLogin] = useState(settings.openAtLogin === true)
   const canStartWithSystem = packaged && platform !== 'linux'
   const [tabStrip, setTabStrip] = useState<TabStrip>(tabStripOf(settings))
+  const [checkUpdates, setCheckUpdates] = useState(settings.checkUpdates !== false)
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault()
@@ -332,6 +350,7 @@ export function SettingsDialog() {
           autoSwitch,
           tray,
           tabStrip,
+          checkUpdates,
           // not sent from a development run, which must not register itself
           ...(canStartWithSystem ? { openAtLogin } : {})
         })
@@ -402,6 +421,11 @@ export function SettingsDialog() {
             <input type="checkbox" checked={openAtLogin && canStartWithSystem} disabled={!canStartWithSystem} onChange={(e) => setOpenAtLogin(e.target.checked)} />
             Start with {platform === 'win32' ? 'Windows' : 'the system'}
           </label>
+          <label className="check">
+            <input type="checkbox" checked={checkUpdates} onChange={(e) => setCheckUpdates(e.target.checked)} />
+            Check for updates automatically
+          </label>
+          <UpdateCheck />
         </div>
         {platform === 'win32' && <ExplorerMenuSetting />}
         <div className="dialog-actions">

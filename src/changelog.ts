@@ -95,6 +95,23 @@ export function parseInline(text: string): InlinePiece[] {
 /** The changelog that came with this build. */
 export const CHANGELOG: readonly ChangelogRelease[] = parseChangelog(changelogText)
 
+/**
+ * The changes of a version that is not installed yet: its entry in `changelog` when that has one
+ * (it does not for a version newer than this build), else its release notes as `latest.json` has
+ * them, the release's part of CHANGELOG.md with or without its `## [version]` heading. Null when
+ * the notes are no such list; they are then shown as they are written.
+ */
+export function releaseNotes(version: string, notes: string | null, changelog: readonly ChangelogRelease[] = CHANGELOG): ChangelogRelease | null {
+  const known = changelog.find((r) => r.version === version)
+  if (known) return known
+  if (!notes?.trim()) return null
+  const hasItems = (r: ChangelogRelease | undefined): r is ChangelogRelease => r !== undefined && r.parts.some((p) => p.items.length > 0)
+  const own = parseChangelog(notes).find((r) => r.version === version)
+  if (hasItems(own)) return own
+  const parsed = parseChangelog(`## [${version}]\n${notes}`)[0]
+  return hasItems(parsed) ? parsed : null
+}
+
 /** The newest release that has a version number; what the dot on the sidebar button is about. */
 export const NEWEST_VERSION: string | null = CHANGELOG.find((r) => r.date !== null)?.version ?? CHANGELOG[0]?.version ?? null
 

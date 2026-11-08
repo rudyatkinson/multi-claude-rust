@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CHANGELOG, NEWEST_VERSION, parseChangelog, parseInline } from '../src/changelog'
+import { CHANGELOG, NEWEST_VERSION, parseChangelog, parseInline, releaseNotes } from '../src/changelog'
 
 describe('parseChangelog', () => {
   const md = [
@@ -74,5 +74,31 @@ describe('the changelog of this build', () => {
     expect(CHANGELOG.length).toBeGreaterThan(0)
     expect(NEWEST_VERSION).toBe(CHANGELOG.find((r) => r.date !== null)?.version)
     expect(CHANGELOG.every((r) => r.parts.every((p) => p.items.length > 0))).toBe(true)
+  })
+})
+
+describe('releaseNotes', () => {
+  const known = parseChangelog('## [0.6.0] - 2026-11-08\n### Added\n- Updates')
+
+  it('takes the entry of this build when it has the version', () => {
+    expect(releaseNotes('0.6.0', 'something else', known)).toBe(known[0])
+  })
+
+  it('reads the notes of a newer version, with or without their heading', () => {
+    const part = { title: 'Fixed', items: ['A **fix**', 'Another one on two lines'] }
+    expect(releaseNotes('0.6.1', '### Fixed\n- A **fix**\n- Another one\n  on two lines\n', known)).toEqual({ version: '0.6.1', date: null, parts: [part] })
+    expect(releaseNotes('0.6.1', '## [0.6.1] - 2026-11-20\r\n\r\n### Fixed\r\n- A **fix**\r\n- Another one on two lines', known)).toEqual({
+      version: '0.6.1',
+      date: '2026-11-20',
+      parts: [part]
+    })
+    // a list without a part heading
+    expect(releaseNotes('0.6.1', '- One thing', known)?.parts).toEqual([{ title: '', items: ['One thing'] }])
+  })
+
+  it('has no list for notes that are none, or for no notes', () => {
+    expect(releaseNotes('0.6.1', 'See the release page.', known)).toBeNull()
+    expect(releaseNotes('0.6.1', '  ', known)).toBeNull()
+    expect(releaseNotes('0.6.1', null, known)).toBeNull()
   })
 })

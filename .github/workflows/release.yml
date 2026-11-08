@@ -1,0 +1,101 @@
+# Builds the installers of a version tag (v0.6.1) and puts them, signed for the updater, into a
+# draft GitHub release together with latest.json, the file installed apps check for updates.
+#
+# Installed apps only see the update once the draft is published: they read
+# /releases/latest/download/latest.json, and "latest" is the newest published release that is
+# not a prerelease. Before publishing, check that latest.json lists windows-x86_64,
+# darwin-aarch64 and darwin-x86_64.
+#
+# Needs the repository secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# (see "Updates" in README.md); GITHUB_TOKEN is provided by GitHub.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      # One at a time: each job finds or creates the draft release and adds its platform to
+      # latest.json there. Two jobs that finish together could open two drafts, or write over
+      # each other's latest.json entry.
+      max-parallel: 1
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: The tag names the app's version
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match the version $version of src-tauri/tauri.conf.json."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # The section of CHANGELOG.md for this version becomes the release text and the "notes" of
+      # latest.json, which the app shows under "What's new" before installing.
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          awk -v heading="## [$VERSION]" '
+            index($0, "## ") == 1 { if (found) exit; if (index($0, heading) == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::CHANGELOG.md has no section \"## [$VERSION]\"; the release gets a one-line text."
+            echo "Multi Claude $VERSION" > release-notes.md
+          fi
+          {
+            echo 'body<<RELEASE_NOTES_END'
+            cat release-notes.md
+            echo 'RELEASE_NOTES_END'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Multi Claude v__VERSION__
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}
