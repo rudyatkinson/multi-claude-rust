@@ -2562,6 +2562,7 @@ name = "multi-claude"
 version = "0.6.0"
 dependencies = [
  "axum",
+ "chrono",
  "dirs 6.0.0",
  "env_logger",
  "hex",
@@ -2570,7 +2571,6 @@ dependencies = [
  "log",
  "mc-core",
  "notify",
- "notify-debouncer-mini",
  "portable-pty",
  "rand 0.9.5",
  "regex",
@@ -2682,18 +2682,6 @@ dependencies = [
  "objc2-core-services",
  "walkdir",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "notify-debouncer-mini"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a689eb4262184d9a1727f9087cd03883ea716682ab03ed24efec57d7716dccb8"
-dependencies = [
- "log",
- "notify",
- "notify-types",
- "tempfile",
 ]
 
 [[package]]
