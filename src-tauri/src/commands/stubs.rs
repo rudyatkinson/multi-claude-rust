@@ -1,8 +1,6 @@
 //! Commands of later phases, registered so that the renderer gets a message it shows as a toast
 //! instead of an unknown command. Each one is replaced by its package's real command.
 //!
-//! - Phase 2: workflows, moving a conversation to another account (`sessions:transfer`), the
-//!   external terminal (`sessions:openExternal`), the conversation history (`conversations:*`).
 //! - Phase 3: the Library (`skills:*`, `agents:*`, `memory:*`, `instructions:*`).
 //!
 //! A stub takes no arguments: Tauri ignores the ones the renderer sends.
@@ -23,19 +21,6 @@ macro_rules! not_yet {
 }
 
 not_yet!(
-    sessions_transfer,
-    sessions_open_external,
-    conversations_list,
-    conversations_open,
-    workflows_save,
-    workflows_delete,
-    workflows_run,
-    workflows_approve,
-    workflows_retry,
-    workflows_stop,
-    workflows_dismiss,
-    workflows_take_answer,
-    workflows_output,
     skills_list,
     skills_read,
     skills_save,

@@ -1,5 +1,6 @@
 //! Starting sessions: the checks of `spawn` that need other services, the settings file a Claude
-//! session starts with (`prepareSettings`), and a restart in the same tab (`restart`).
+//! session starts with (`prepareSettings`), a new session in an existing tab (`replace`), and a
+//! restart in the same tab (`restart`).
 
 use std::path::{Path, PathBuf};
 
@@ -37,6 +38,13 @@ pub fn start_session(state: &AppState, request: &SessionRequest, place: Option<P
     let mut plan = plan_session(state, request)?;
     plan.place = place;
     state.sessions.create(plan)
+}
+
+/// Starts a session of `request` in the tab of `old_id` (`sessions.replace(id, request)` of the
+/// Electron version): the old session goes once the new one runs.
+pub fn replace_session(state: &AppState, old_id: &str, request: &SessionRequest) -> AppResult<SessionInfo> {
+    let plan = plan_session(state, request)?;
+    state.sessions.replace(old_id, plan)
 }
 
 /// `prepareSettings`: writes the settings file a session is started with, `run/<profile>.<session>.settings.json`:
@@ -98,6 +106,5 @@ pub fn restart_session(state: &AppState, id: &str, continue_conversation: bool) 
         (true, _) => Some(SessionResume::Mode(ResumeMode::Last)),
     };
     request.prompt = None;
-    let plan = plan_session(state, &request)?;
-    state.sessions.replace(id, plan)
+    replace_session(state, id, &request)
 }

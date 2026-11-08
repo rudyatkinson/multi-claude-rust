@@ -1,8 +1,7 @@
 //! Commands of the `sessions` package (`sessions:*` and `pty:*` of `src/main/ipc.ts`).
 //! Each command: validate with `mc_core::validate`, call the service on `AppState`, return `CmdResult<T>`.
 //!
-//! `sessions:transfer` (moving a conversation to another account) and `sessions:openExternal`
-//! (the external terminal) are Phase 2; see `commands::stubs`.
+//! `sessions:transfer` (moving a conversation to another account) is in `commands::transfer`.
 
 use mc_core::error::AppError;
 use mc_core::terminal_input::is_typing;
@@ -15,6 +14,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::app::launch::{restart_session, start_session};
 use crate::app::{note_turn, remember_folder};
 use crate::error::{CmdError, CmdResult};
+use crate::external_terminal::open_external_session;
 use crate::state::AppState;
 
 /// `sessions:create`: a Claude tab in a folder that exists, for an account that exists, where the
@@ -34,6 +34,16 @@ pub async fn sessions_create(state: State<'_, AppState>, input: Option<Value>) -
     let info = start_session(&state, &request, input.place)?;
     remember_folder(&state, &request.cwd);
     Ok(info)
+}
+
+/// `sessions:openExternal`: the account's Claude in a terminal of its own, in a folder that exists.
+/// The folder goes to the top of the recent folders.
+#[tauri::command]
+pub async fn sessions_open_external(state: State<'_, AppState>, input: Option<Value>) -> CmdResult<()> {
+    let input = validate::session_input(&input.unwrap_or(Value::Null))?;
+    open_external_session(&state, &input)?;
+    remember_folder(&state, &input.cwd);
+    Ok(())
 }
 
 /// `sessions:restart`: the session again in its tab; `continueLast` (only a real `true`)
@@ -96,7 +106,7 @@ pub fn pty_write(state: State<'_, AppState>, payload: PtyWrite) -> CmdResult<()>
     state.sessions.write(&payload.id, &payload.data);
     // the terminal's own reports travel this way too: its focus, the mouse, its answers
     if is_typing(&payload.data) {
-        // Phase 2: `workflowRuns.input(id)`
+        state.runs.input(&payload.id);
         note_turn(&state, &payload.id, &TurnEvent::Typed);
     }
     Ok(())

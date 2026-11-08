@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Mutex, MutexGuard, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 
 use mc_core::open_folder_args::StartupArgs;
 use mc_core::types::{AppSettings, ClaudeBinaryInfo};
@@ -25,6 +25,16 @@ pub struct AppState {
     pub alerts: crate::session_alerts::SessionAlerts,
     pub usage: crate::usage::UsageTracker,
     pub tabs: crate::tab_store::TabStore,
+    /// The designed workflows (`workflows.json`).
+    pub workflows: crate::workflows::WorkflowStore,
+    /// The runs of workflows, in memory only.
+    pub runs: crate::workflows::WorkflowRuns,
+    /// Moves a conversation that a usage limit cut off to another account by itself.
+    pub auto_switch: crate::auto_switch::AutoSwitch,
+    /// The past conversations of the accounts, as last listed.
+    pub conversations: Mutex<mc_core::conversations::ConversationIndex>,
+    /// "Open in Multi Claude" in File Explorer.
+    pub explorer_menu: crate::explorer_menu::ExplorerMenu,
     // Phase 3: the Library services
     pub skills: crate::skills::SkillService,
     pub agents: crate::agents::AgentService,
@@ -90,6 +100,7 @@ pub fn app_root() -> Result<(PathBuf, bool), String> {
 impl AppState {
     pub fn new(app: AppHandle, root: PathBuf, startup: StartupArgs) -> Result<Self, Box<dyn std::error::Error>> {
         std::fs::create_dir_all(&root)?;
+        let os_build = windows_build();
         Ok(AppState {
             claude: RwLock::new(ClaudeBinaryInfo::default()),
             profiles: crate::profiles::ProfileService::new(app.clone(), root.clone()),
@@ -98,11 +109,16 @@ impl AppState {
             alerts: crate::session_alerts::SessionAlerts::new(app.clone()),
             usage: crate::usage::UsageTracker::new(app.clone(), root.clone()),
             tabs: crate::tab_store::TabStore::new(root.clone()),
+            workflows: crate::workflows::WorkflowStore::new(crate::paths::Paths::new(root.clone()).workflows_file()),
+            runs: crate::workflows::WorkflowRuns::new(Arc::new(crate::workflows::AppRuns(app.clone()))),
+            auto_switch: crate::auto_switch::AutoSwitch::new(Arc::new(crate::auto_switch::AppSwitch(app.clone()))),
+            conversations: Mutex::default(),
+            explorer_menu: crate::explorer_menu::ExplorerMenu::for_this_build(os_build),
             skills: crate::skills::SkillService::new(app.clone(), root.clone()),
             agents: crate::agents::AgentService::new(app.clone(), root.clone()),
             memory: crate::memory::MemoryService::new(app.clone(), root.clone()),
             instructions: crate::instructions::InstructionService::new(app.clone(), root.clone()),
-            os_build: windows_build(),
+            os_build,
             startup,
             flags: Flags::default(),
             pending_open_folders: Mutex::default(),

@@ -23,6 +23,13 @@ pub fn is_focused(app: &AppHandle) -> bool {
     main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false))
 }
 
+/// Electron's `flashFrame(true)`: the taskbar button asks for attention until the window is focused.
+pub fn flash(app: &AppHandle) {
+    if let Some(win) = main_window(app) {
+        let _ = win.request_user_attention(Some(UserAttentionType::Informational));
+    }
+}
+
 /// Shows the window. Its first appearance lets the restored tabs and the queued folders through.
 pub fn show(state: &AppState) {
     if let Some(win) = main_window(&state.app) {

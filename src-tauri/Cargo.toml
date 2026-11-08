@@ -51,3 +51,5 @@ windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_
 
 [dev-dependencies]
 tempfile.workspace = true
+# a paused clock for the timers of the workflow runs and the auto switch
+tokio = { version = "1", features = ["rt", "macros", "test-util"] }

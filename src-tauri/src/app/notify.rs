@@ -1,20 +1,23 @@
-//! System notifications of the app itself (usage limits; Phase 2: workflow runs). A click on one
-//! brings the window to the front. Session alerts have their own (`session_alerts::TauriOutput`),
-//! which also brings the session's tab to the front.
+//! System notifications of the app itself (usage limits, workflow runs, the auto switch). A click
+//! on one brings the window to the front, and the tab it is about when it names one. Session
+//! alerts have their own (`session_alerts::TauriOutput`).
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, Once};
 
+use mc_core::types::Activate;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 
 use crate::app::window::bring_to_front;
+use crate::events;
 use crate::state::lock;
 
 /// How many shown notifications a click is still traced back to.
 const KEPT: usize = 64;
 
-static SHOWN: Mutex<VecDeque<i32>> = Mutex::new(VecDeque::new());
+/// The notifications shown, with the tab a click brings to the front.
+static SHOWN: Mutex<VecDeque<(i32, Option<String>)>> = Mutex::new(VecDeque::new());
 static LISTENING: Once = Once::new();
 
 /// Registers, once, what a click on one of these notifications does. The plugin reports clicks
@@ -27,11 +30,12 @@ fn listen_for_clicks(app: &AppHandle) {
                 return;
             }
             let Some(shown) = performed.notification() else { return };
-            if !lock(&SHOWN).contains(&shown.id()) {
-                return;
-            }
+            let Some(tab) = lock(&SHOWN).iter().find(|(id, _)| *id == shown.id()).map(|(_, tab)| tab.clone()) else { return };
             if let Some(state) = crate::app::state(&app) {
                 bring_to_front(&state);
+            }
+            if let Some(id) = tab {
+                events::emit(&app, events::SESSIONS_ACTIVATE, Activate { id });
             }
         });
         if let Err(e) = registered {
@@ -42,11 +46,17 @@ fn listen_for_clicks(app: &AppHandle) {
 
 /// Shows a desktop notification; clicking it brings the window to the front.
 pub fn show(app: &AppHandle, title: &str, body: &str) {
+    show_for(app, title, body, None);
+}
+
+/// Shows a desktop notification; clicking it brings the window to the front and, when `tab` is
+/// given, that session's tab (`sessions:activate`).
+pub fn show_for(app: &AppHandle, title: &str, body: &str, tab: Option<&str>) {
     listen_for_clicks(app);
     let id = rand::random::<i32>() & i32::MAX;
     {
         let mut shown = lock(&SHOWN);
-        shown.push_back(id);
+        shown.push_back((id, tab.map(str::to_owned)));
         while shown.len() > KEPT {
             shown.pop_front();
         }

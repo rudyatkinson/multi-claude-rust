@@ -8,12 +8,16 @@
 
 pub mod app;
 pub mod attention;
+pub mod conversations;
+pub mod explorer_menu;
 pub mod layout;
 pub mod mcp;
 pub mod profiles;
 pub mod sessions;
 pub mod stubs;
+pub mod transfer;
 pub mod usage;
+pub mod workflows;
 pub mod agents;
 pub mod instructions;
 pub mod memory;
@@ -47,8 +51,8 @@ registry![
     app::clipboard_write_text,
     app::dialog_pick_folder,
     app::fs_folder_for,
-    app::explorer_menu_status,
-    app::explorer_menu_set,
+    explorer_menu::explorer_menu_status,
+    explorer_menu::explorer_menu_set,
     app::ui_unsaved,
     // profiles
     profiles::profiles_create,
@@ -76,20 +80,21 @@ registry![
     // mcp
     mcp::mcp_list,
     mcp::mcp_copy,
-    // Phase 2
-    stubs::sessions_transfer,
-    stubs::sessions_open_external,
-    stubs::conversations_list,
-    stubs::conversations_open,
-    stubs::workflows_save,
-    stubs::workflows_delete,
-    stubs::workflows_run,
-    stubs::workflows_approve,
-    stubs::workflows_retry,
-    stubs::workflows_stop,
-    stubs::workflows_dismiss,
-    stubs::workflows_take_answer,
-    stubs::workflows_output,
+    transfer::sessions_transfer,
+    sessions::sessions_open_external,
+    // conversations
+    conversations::conversations_list,
+    conversations::conversations_open,
+    // workflows
+    workflows::workflows_save,
+    workflows::workflows_delete,
+    workflows::workflows_run,
+    workflows::workflows_approve,
+    workflows::workflows_retry,
+    workflows::workflows_stop,
+    workflows::workflows_dismiss,
+    workflows::workflows_take_answer,
+    workflows::workflows_output,
     // Phase 3
     stubs::skills_list,
     stubs::skills_read,

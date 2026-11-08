@@ -84,16 +84,30 @@ pub async fn refresh_all_profiles(state: &AppState) {
 }
 
 /// `noteTurn`: moves a Claude session's turn along with what its hooks report and with what is
-/// typed into its tab. (Phase 2: the auto switch hears of typing and of a turn cut by a limit.)
+/// typed into its tab. The auto switch hears of typing and of a turn that a usage limit cut off.
+///
+/// The alerts hear of the change once the next turn change may go ahead: telling the user asks
+/// the window whether it is in front, which waits for the window's thread, and that thread may
+/// itself be waiting here (typing comes from there).
 pub fn note_turn(state: &AppState, session_id: &str, event: &TurnEvent) {
-    let _one_at_a_time = lock(&state.turn_lock);
-    let Some(info) = state.sessions.get(session_id) else { return };
-    if info.kind != SessionKind::Claude {
-        return;
-    }
-    let Some(next) = next_turn(info.turn.as_ref(), event, now_ms()) else { return };
-    state.sessions.set_turn(session_id, Some(next));
-    if let Some(info) = state.sessions.get(session_id) {
-        state.alerts.turn_changed(&info);
+    let changed = {
+        let _one_at_a_time = lock(&state.turn_lock);
+        let Some(info) = state.sessions.get(session_id) else { return };
+        if info.kind != SessionKind::Claude {
+            return;
+        }
+        let next = next_turn(info.turn.as_ref(), event, now_ms());
+        if let Some(next) = &next {
+            state.sessions.set_turn(session_id, Some(next.clone()));
+        }
+        // an event that changes nothing leaves the turn as it was
+        let after = next.as_ref().or(info.turn.as_ref());
+        crate::auto_switch::note_turn(state, session_id, event, info.turn.as_ref(), after);
+        next.is_some()
+    };
+    if changed {
+        if let Some(info) = state.sessions.get(session_id) {
+            state.alerts.turn_changed(&info);
+        }
     }
 }

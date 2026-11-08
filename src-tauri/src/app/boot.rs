@@ -50,7 +50,8 @@ pub fn setup(app: &mut App, root: std::path::PathBuf, startup: StartupArgs) -> R
 
     state.usage.prune(state.profiles.list().iter().map(|p| p.id.as_str()));
     state.usage.start();
-    // without it the app works as before: tabs do not report their turns
+    crate::workflows::boot(&state);
+    // without it the app works as before: tabs do not report their turns, and workflows cannot run
     if let Err(e) = state.hooks.start() {
         log::warn!("{e}");
         *lock(&state.hook_problem) = Some(e.to_string());
@@ -88,6 +89,12 @@ async fn boot(app: AppHandle) {
         log::debug!("accounts checked: {}", account_summary(&state));
     }
     state.usage.start_prober();
+    // after an update or a moved install the menu entry has to point at this executable again
+    if state.settings().explorer_menu == Some(true) {
+        if let Err(e) = state.explorer_menu.ensure().await {
+            log::warn!("explorer menu: {e}");
+        }
+    }
 }
 
 fn account_summary(state: &AppState) -> String {
@@ -155,7 +162,9 @@ pub fn shutdown(state: &AppState) {
     }
     state.tabs.persist(&state.sessions.saved_tabs());
     state.tabs.quit();
-    // Phase 2: workflow runs and the auto switch stop; Phase 4: the tray icon goes
+    // Phase 4: the tray icon goes
+    state.runs.stop_all();
+    state.auto_switch.stop();
     state.usage.stop();
     state.sessions.kill_all();
     state.hooks.stop();

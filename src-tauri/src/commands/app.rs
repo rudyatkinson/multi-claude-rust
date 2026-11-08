@@ -1,10 +1,11 @@
 //! Commands of the app itself (`app:*`, `settings:update`, `shell:openExternal`, `clipboard:*`,
-//! `dialog:pickFolder`, `fs:folderFor`, `explorerMenu:*`, `ui:unsaved`).
+//! `dialog:pickFolder`, `fs:folderFor`, `ui:unsaved`). `explorerMenu:*` is in
+//! `commands::explorer_menu`.
 
 use std::path::Path;
 
 use mc_core::jsstr::cut16;
-use mc_core::types::{AppState as WindowState, ClipboardContent, ExplorerMenuStatus, ExplorerMenuTier, UNSAVED_MAX_CHARS, UNSAVED_MAX_ITEMS};
+use mc_core::types::{AppState as WindowState, ClipboardContent, UNSAVED_MAX_CHARS, UNSAVED_MAX_ITEMS};
 use mc_core::validate;
 use serde_json::Value;
 use tauri::{AppHandle, State};
@@ -14,7 +15,6 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::app::window::main_window;
 use crate::app::{emit_app_changed, locate_claude, refresh_all_profiles};
-use crate::commands::stubs::NOT_YET;
 use crate::error::{CmdError, CmdResult};
 use crate::sharing::{SHARED_DIRS, SHARED_FILES};
 use crate::state::{lock, AppState};
@@ -56,9 +56,8 @@ pub fn window_state(state: &AppState) -> WindowState {
         claude: state.claude_info(),
         shareable_dirs: existing(&SHARED_DIRS),
         shareable_files: existing(&SHARED_FILES),
-        // Phase 2
-        workflows: Vec::new(),
-        runs: Vec::new(),
+        workflows: state.workflows.list(),
+        runs: state.runs.list(),
     }
 }
 
@@ -144,24 +143,6 @@ pub async fn fs_folder_for(path: String) -> CmdResult<Option<String>> {
         _ => None,
     };
     Ok(folder.map(Path::to_string_lossy).map(|p| p.into_owned()))
-}
-
-/// `explorerMenu:status`: the File Explorer entry comes with Phase 4; until then it is off.
-#[tauri::command]
-pub fn explorer_menu_status() -> CmdResult<ExplorerMenuStatus> {
-    Ok(ExplorerMenuStatus {
-        supported: false,
-        tier: None,
-        available: ExplorerMenuTier::Classic,
-        reason: Some("The context menu entry is not available yet in this build.".into()),
-        detail: None,
-    })
-}
-
-/// `explorerMenu:set` (Phase 4).
-#[tauri::command]
-pub fn explorer_menu_set() -> CmdResult<ExplorerMenuStatus> {
-    Err(CmdError(NOT_YET.into()))
 }
 
 /// `ui:unsaved` (send): the drafts with unsaved changes in the window's Library, cut down to a

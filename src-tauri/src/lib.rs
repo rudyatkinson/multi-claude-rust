@@ -25,6 +25,14 @@ pub mod tab_store;
 pub mod token_vault;
 pub mod usage;
 
+// Phase 2 packages
+pub mod auto_switch;
+pub mod conversations;
+pub mod explorer_menu;
+pub mod external_terminal;
+pub mod transfer;
+pub mod workflows;
+
 // Phase 3 packages
 pub mod agents;
 pub mod instructions;

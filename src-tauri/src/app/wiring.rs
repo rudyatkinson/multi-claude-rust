@@ -11,6 +11,7 @@ use mc_core::hooks::parse_hook;
 use mc_core::layout::reconcile;
 use mc_core::turn::turn_event_of;
 use mc_core::types::{AccountInfo, AuthKind, Profile, SessionInfo, SessionKind, SessionRef};
+use mc_core::workflow::RunSession;
 use tauri::AppHandle;
 
 use crate::app::{notice, note_turn, now_ms, state as app_state, window};
@@ -46,7 +47,8 @@ fn wire_sessions(app: &AppHandle, state: &AppState) {
         state.tabs.update_layout(|layout| reconcile(layout, &refs));
         state.tabs.persist(&state.sessions.saved_tabs());
         state.alerts.prune(list.iter().map(|s| s.id.as_str()));
-        // Phase 2: the workflow runs hear of the list; Phase 4: the tray tooltip counts the sessions
+        state.runs.sessions_changed(list.iter().map(RunSession::from).collect());
+        // Phase 4: the tray tooltip counts the sessions
         // a restored arrangement travels with the list that introduces its sessions, and only with it
         state.flags.layout_to_send.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| state.tabs.layout())
     }));
@@ -149,7 +151,7 @@ fn wire_hooks(app: &AppHandle, state: &AppState) {
         let account = info.as_ref().and_then(|i| state.profiles.get(&i.profile_id)).map(|p| p.name).unwrap_or_default();
         limit_log::record_hook(&state.root, event, &body, &account);
         let Some(report) = parse_hook(event, &body) else { return };
-        // Phase 2: `workflowRuns.hook(sessionId, report)`
+        state.runs.hook(&session_id, &report);
         note_turn(&state, &session_id, &turn_event_of(&report.signal));
     }));
 }
@@ -224,8 +226,7 @@ impl AlertDeps for Alerts {
         app_state(&self.0).is_some_and(|s| s.profiles.config().with(|c| c.settings.notifications) != Some(false))
     }
 
-    fn is_workflow_step(&self, _id: &str) -> bool {
-        // Phase 2: `workflowRuns.watches(id)`
-        false
+    fn is_workflow_step(&self, id: &str) -> bool {
+        app_state(&self.0).is_some_and(|s| s.runs.watches(id))
     }
 }
