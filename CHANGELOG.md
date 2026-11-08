@@ -16,6 +16,7 @@ This file is shown inside the app under **What's new**.
 ### Changed
 - **Rewritten in Rust.** The backend that used to run on Electron and Node is now a Rust program on Tauri 2 with the system WebView. The installer is a fraction of its former size, the app starts faster and uses far less memory. Accounts, tabs, workflows and settings in `~/.multi-claude` are read as they are; nothing has to be migrated.
 - Sidebar footer icons are larger (18 px in 30 px buttons); they were hard to hit, above all on macOS.
+- Plans without a 5-hour limit (Ultra) show only their weekly rows; such an account counts as having all the room when the app suggests one to continue on, and its plan badge reads Ultra.
 - Tabs are dragged with the pointer directly instead of the browser's drag-and-drop, which makes the drop preview follow the mouse without delay.
 - OAuth tokens of token accounts are kept in the operating system's credential store (Windows Credential Manager, macOS Keychain). Tokens saved by the Electron version cannot be read by this one; such accounts ask for the token again once.
 
