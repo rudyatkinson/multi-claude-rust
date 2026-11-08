@@ -72,7 +72,8 @@ $latest = [ordered]@{
   pub_date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   platforms = @{ 'windows-x86_64' = @{ signature = $sig; url = "http://127.0.0.1:$port/$fileName" } }
 }
-$latest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Out 'serve\latest.json') -Encoding UTF8
+# no byte order mark: the updater's JSON parser does not take one
+[IO.File]::WriteAllText((Join-Path $Out 'serve\latest.json'), ($latest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
 
 Write-Host ""
 Write-Host "Ready."
