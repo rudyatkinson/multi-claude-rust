@@ -25,6 +25,12 @@ pub mod tab_store;
 pub mod token_vault;
 pub mod usage;
 
+// Phase 3 packages
+pub mod agents;
+pub mod instructions;
+pub mod memory;
+pub mod skills;
+
 /// Builds and runs the Tauri application. Called from `main.rs`.
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();

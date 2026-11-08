@@ -14,6 +14,10 @@ pub mod profiles;
 pub mod sessions;
 pub mod stubs;
 pub mod usage;
+pub mod agents;
+pub mod instructions;
+pub mod memory;
+pub mod skills;
 
 /// Defines [`handler`] and the list of the names it registers from one list of commands.
 macro_rules! registry {

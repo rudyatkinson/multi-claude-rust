@@ -25,6 +25,11 @@ pub struct AppState {
     pub alerts: crate::session_alerts::SessionAlerts,
     pub usage: crate::usage::UsageTracker,
     pub tabs: crate::tab_store::TabStore,
+    // Phase 3: the Library services
+    pub skills: crate::skills::SkillService,
+    pub agents: crate::agents::AgentService,
+    pub memory: crate::memory::MemoryService,
+    pub instructions: crate::instructions::InstructionService,
     /// Windows build number, for the terminal's ConPTY quirks.
     pub os_build: Option<u32>,
     /// What this process was started for: a folder from the Explorer context menu, the login item.
@@ -93,6 +98,10 @@ impl AppState {
             alerts: crate::session_alerts::SessionAlerts::new(app.clone()),
             usage: crate::usage::UsageTracker::new(app.clone(), root.clone()),
             tabs: crate::tab_store::TabStore::new(root.clone()),
+            skills: crate::skills::SkillService::new(app.clone(), root.clone()),
+            agents: crate::agents::AgentService::new(app.clone(), root.clone()),
+            memory: crate::memory::MemoryService::new(app.clone(), root.clone()),
+            instructions: crate::instructions::InstructionService::new(app.clone(), root.clone()),
             os_build: windows_build(),
             startup,
             flags: Flags::default(),
