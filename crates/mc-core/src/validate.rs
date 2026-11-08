@@ -856,7 +856,7 @@ mod tests {
             "openAtLogin": true,
             "explorerMenu": true,
             "trayHintShown": true,
-            "skillFolders": ["C:\x"],
+            "skillFolders": ["C:\\x"],
             "tabStrip": "side"
         }));
         assert_eq!(
