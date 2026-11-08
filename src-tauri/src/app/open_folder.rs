@@ -46,7 +46,7 @@ fn restore_tabs(state: &AppState) {
         return;
     }
     let plan = plan_restore_on_disk(&state.tabs.load(), |id| state.config_dir_of(id));
-    if plan.requests.is_empty() {
+    if plan.requests.is_empty() && plan.panels.is_empty() {
         return;
     }
     let started: Vec<Option<String>> = plan

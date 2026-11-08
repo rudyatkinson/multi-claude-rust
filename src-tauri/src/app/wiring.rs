@@ -32,6 +32,21 @@ pub fn wire(app: &AppHandle) {
     wire_hooks(app, &state);
     wire_usage(app, &state);
     state.alerts.set_deps(Arc::new(Alerts(app.clone())));
+    wire_instructions(app, &state);
+}
+
+// ---------- instructions ----------
+
+/// "What a session reads" ends with the memory folder the session really uses: the main account's
+/// for an account that shares memory, else its own.
+fn wire_instructions(app: &AppHandle, state: &AppState) {
+    let handle = app.clone();
+    state.instructions.set_memory_dir(move |profile_id, cwd| {
+        let state = app_state(&handle)?;
+        let profile = state.profiles.get(profile_id)?;
+        let paths = state.profiles.paths();
+        state.memory.session_memory_dir(&paths.main_claude_dir(), &profile, &paths.config_dir_of(&profile), cwd)
+    });
 }
 
 // ---------- sessions ----------

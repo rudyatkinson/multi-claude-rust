@@ -68,8 +68,15 @@ pub fn prepare_settings(state: &AppState, profile: &Profile, session_id: &str, c
             None => {}
         }
     }
-    // TODO(Phase 3): `autoMemoryDirectory` for an account that shares the main account's memory
-    // (`profile.share_memory && !profile.is_default`), with a notice when that folder is refused.
+    // An account that shares the main account's memory reads and writes that folder; when the
+    // folder cannot be worked out the session keeps its own memory and the user is told.
+    match state.memory.auto_memory_directory(&state.profiles.paths().main_claude_dir(), profile, cwd) {
+        Ok(Some(dir)) => {
+            settings.insert("autoMemoryDirectory".to_owned(), Value::String(dir.to_string_lossy().into_owned()));
+        }
+        Ok(None) => {}
+        Err(warning) => crate::app::notice(state, crate::events::NoticeLevel::Warn, warning),
+    }
     if settings.is_empty() {
         return Ok(None);
     }

@@ -14,7 +14,6 @@ pub mod layout;
 pub mod mcp;
 pub mod profiles;
 pub mod sessions;
-pub mod stubs;
 pub mod transfer;
 pub mod usage;
 pub mod workflows;
@@ -27,9 +26,8 @@ pub mod skills;
 macro_rules! registry {
     ($($module:ident :: $name:ident),* $(,)?) => {
         /// All commands registered with the Tauri builder: every channel of `INVOKE_CHANNELS` and
-        /// `SEND_CHANNELS` of the renderer, plus `app_get_version`. Commands of later phases are
-        /// stubs (`stubs`) until their packages replace them. `usage_refresh` is not registered:
-        /// the renderer has no usage channel of its own.
+        /// `SEND_CHANNELS` of the renderer, plus `app_get_version`. `usage_refresh` is not
+        /// registered: the renderer has no usage channel of its own.
         pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             tauri::generate_handler![$($module::$name),*]
         }
@@ -96,51 +94,51 @@ registry![
     workflows::workflows_take_answer,
     workflows::workflows_output,
     // Phase 3
-    stubs::skills_list,
-    stubs::skills_read,
-    stubs::skills_save,
-    stubs::skills_create,
-    stubs::skills_duplicate,
-    stubs::skills_rename,
-    stubs::skills_delete,
-    stubs::skills_transfer,
-    stubs::skills_export,
-    stubs::skills_pick_import,
-    stubs::skills_import,
-    stubs::skills_reveal,
-    stubs::skills_open_file,
-    stubs::skills_assist,
-    stubs::skills_add_folder,
-    stubs::skills_remove_folder,
-    stubs::agents_list,
-    stubs::agents_read,
-    stubs::agents_save,
-    stubs::agents_create,
-    stubs::agents_duplicate,
-    stubs::agents_rename,
-    stubs::agents_delete,
-    stubs::agents_transfer,
-    stubs::agents_reveal,
-    stubs::agents_add_folder,
-    stubs::agents_remove_folder,
-    stubs::memory_list,
-    stubs::memory_entries,
-    stubs::memory_read,
-    stubs::memory_save,
-    stubs::memory_create,
-    stubs::memory_delete,
-    stubs::memory_search,
-    stubs::memory_adopt,
-    stubs::memory_reveal,
-    stubs::instructions_scopes,
-    stubs::instructions_files,
-    stubs::instructions_read,
-    stubs::instructions_save,
-    stubs::instructions_create,
-    stubs::instructions_delete,
-    stubs::instructions_view,
-    stubs::instructions_reveal,
-    stubs::instructions_add_folder,
+    skills::skills_list,
+    skills::skills_read,
+    skills::skills_save,
+    skills::skills_create,
+    skills::skills_duplicate,
+    skills::skills_rename,
+    skills::skills_delete,
+    skills::skills_transfer,
+    skills::skills_export,
+    skills::skills_pick_import,
+    skills::skills_import,
+    skills::skills_reveal,
+    skills::skills_open_file,
+    skills::skills_assist,
+    skills::skills_add_folder,
+    skills::skills_remove_folder,
+    agents::agents_list,
+    agents::agents_read,
+    agents::agents_save,
+    agents::agents_create,
+    agents::agents_duplicate,
+    agents::agents_rename,
+    agents::agents_delete,
+    agents::agents_transfer,
+    agents::agents_reveal,
+    agents::agents_add_folder,
+    agents::agents_remove_folder,
+    memory::memory_list,
+    memory::memory_entries,
+    memory::memory_read,
+    memory::memory_save,
+    memory::memory_create,
+    memory::memory_delete,
+    memory::memory_search,
+    memory::memory_adopt,
+    memory::memory_reveal,
+    instructions::instructions_scopes,
+    instructions::instructions_files,
+    instructions::instructions_read,
+    instructions::instructions_save,
+    instructions::instructions_create,
+    instructions::instructions_delete,
+    instructions::instructions_view,
+    instructions::instructions_reveal,
+    instructions::instructions_add_folder,
 ];
 
 #[cfg(test)]

@@ -1,11 +1,6 @@
 //! Commands of the `agents` package (`agents:*` of `src/main/ipc.ts`). Each command validates what
 //! the window sent with `mc_core::validate`, in the order the Electron version did, and runs the
 //! work on disk off the async runtime with the roots as the app has them right now.
-//!
-//! Until `commands::stubs` gives up its `agents_*`, the attribute is held back as
-//! `#[cfg_attr(any(), tauri::command)]`: `#[tauri::command]` exports a macro per command name at
-//! the crate root, and two of one name do not compile. Swapping the registry means turning each one
-//! into `#[tauri::command]`.
 
 use mc_core::error::AppResult;
 use mc_core::types::{AgentDetail, AgentListing, AgentMoved, AgentRef, AgentSaveResult, AGENT_LIMITS, SKILL_LIMITS};
@@ -38,13 +33,13 @@ fn agent_of(value: Option<Value>) -> AppResult<AgentRef> {
 }
 
 /// `agents:list`: the agents folders of the accounts and the projects in sight, and their agents.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_list(app: AppHandle) -> CmdResult<AgentListing> {
     on_disk(&app, |state, inputs| Ok(state.agents.list(inputs))).await
 }
 
 /// `agents:read`: an agent's whole file.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_read(app: AppHandle, r#ref: Option<Value>) -> CmdResult<AgentDetail> {
     let agent = agent_of(r#ref)?;
     on_disk(&app, move |state, inputs| state.agents.read(inputs, &agent)).await
@@ -52,7 +47,7 @@ pub async fn agents_read(app: AppHandle, r#ref: Option<Value>) -> CmdResult<Agen
 
 /// `agents:save`: writes an agent's file over the state the editor read (`baseHash`), or over
 /// whatever is there when that is null.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_save(app: AppHandle, r#ref: Option<Value>, text: String, base_hash: Option<String>) -> CmdResult<AgentSaveResult> {
     let agent = agent_of(r#ref)?;
     validate::text(&text, "text", SKILL_LIMITS.file_bytes)?;
@@ -61,7 +56,7 @@ pub async fn agents_save(app: AppHandle, r#ref: Option<Value>, text: String, bas
 }
 
 /// `agents:create`: a new agent at the top of a root.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_create(app: AppHandle, root_id: String, name: String, description: String) -> CmdResult<AgentRef> {
     let root_id = validate::skill_root(&root_id)?.to_owned();
     validate::str(&name, "name", AGENT_LIMITS.new_name)?;
@@ -70,7 +65,7 @@ pub async fn agents_create(app: AppHandle, root_id: String, name: String, descri
 }
 
 /// `agents:duplicate`: a copy next to the original, under another name.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_duplicate(app: AppHandle, r#ref: Option<Value>, name: String) -> CmdResult<AgentRef> {
     let agent = agent_of(r#ref)?;
     validate::str(&name, "name", AGENT_LIMITS.new_name)?;
@@ -78,7 +73,7 @@ pub async fn agents_duplicate(app: AppHandle, r#ref: Option<Value>, name: String
 }
 
 /// `agents:rename`: another name in the file, and for the file when it was named after the agent.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_rename(app: AppHandle, r#ref: Option<Value>, name: String) -> CmdResult<AgentMoved> {
     let agent = agent_of(r#ref)?;
     validate::str(&name, "name", AGENT_LIMITS.new_name)?;
@@ -86,14 +81,14 @@ pub async fn agents_rename(app: AppHandle, r#ref: Option<Value>, name: String) -
 }
 
 /// `agents:delete`: the agent's file into the bin.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_delete(app: AppHandle, r#ref: Option<Value>) -> CmdResult<()> {
     let agent = agent_of(r#ref)?;
     on_disk(&app, move |state, inputs| state.agents.remove(inputs, &agent)).await
 }
 
 /// `agents:transfer`: a copy in another root, or a move there; an empty name keeps the agent's own.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_transfer(app: AppHandle, r#ref: Option<Value>, to_root_id: String, mode: String, name: String) -> CmdResult<AgentMoved> {
     let mode = validate::transfer_mode(&mode)?;
     let agent = agent_of(r#ref)?;
@@ -103,7 +98,7 @@ pub async fn agents_transfer(app: AppHandle, r#ref: Option<Value>, to_root_id: S
 }
 
 /// `agents:reveal`: the agent's file in the file manager.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_reveal(app: AppHandle, r#ref: Option<Value>) -> CmdResult<()> {
     let agent = agent_of(r#ref)?;
     on_disk(&app, move |state, inputs| state.agents.reveal(inputs, &agent)).await
@@ -111,14 +106,14 @@ pub async fn agents_reveal(app: AppHandle, r#ref: Option<Value>) -> CmdResult<()
 
 /// `agents:addFolder`: asks for a project folder and adds it to the Library's list; the id of its
 /// agents root, or null.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_add_folder(state: State<'_, AppState>) -> CmdResult<Option<String>> {
     let state = &*state;
     Ok(state.agents.add_folder(state.profiles.config(), || root_inputs(state)).await?)
 }
 
 /// `agents:removeFolder`: takes a project's folder out of the Library's list.
-#[cfg_attr(any(), tauri::command)]
+#[tauri::command]
 pub async fn agents_remove_folder(app: AppHandle, root_id: String) -> CmdResult<()> {
     let root_id = validate::skill_root(&root_id)?.to_owned();
     on_disk(&app, move |state, inputs| state.agents.remove_folder(state.profiles.config(), inputs, &root_id)).await

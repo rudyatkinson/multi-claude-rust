@@ -36,6 +36,7 @@ pub mod workflows;
 // Phase 3 packages
 pub mod agents;
 pub mod instructions;
+pub mod library;
 pub mod memory;
 pub mod skills;
 
