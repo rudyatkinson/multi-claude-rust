@@ -2,13 +2,15 @@
 //! creating them. [`boot`] starts the app and ends it, [`wiring`] connects the services to each
 //! other, [`launch`] starts sessions, [`open_folder`] delivers folders and restores the last tabs,
 //! [`window`] shows the window and follows its focus, [`quit`] asks before quitting and closes
-//! the window into the tray, [`notify`] shows system notifications.
+//! the window into the tray, [`notify`] shows system notifications, [`login_item`] registers the
+//! start with the system.
 //!
 //! Everything here reaches the services through the managed [`AppState`]; handlers set on the
 //! services hold an `AppHandle` and look the state up when they run.
 
 pub mod boot;
 pub mod launch;
+pub mod login_item;
 pub mod notify;
 pub mod open_folder;
 pub mod quit;

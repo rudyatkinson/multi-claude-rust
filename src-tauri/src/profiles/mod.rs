@@ -171,7 +171,8 @@ impl ProfileService {
     }
 
     fn trash_fn(&self) -> TrashFn {
-        self.hooks().trash.clone().unwrap_or_else(|| Arc::new(|dir: &Path| trash::delete(dir).map_err(|e| e.to_string())))
+        // the Library's way into the bin, on a thread of its own for COM
+        self.hooks().trash.clone().unwrap_or_else(|| Arc::new(|dir: &Path| crate::library::trash::system_trash(dir).map_err(|e| e.to_string())))
     }
 
     // ---------- reading ----------

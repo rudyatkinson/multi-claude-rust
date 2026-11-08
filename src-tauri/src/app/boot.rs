@@ -97,22 +97,7 @@ fn shell_integration(app: &AppHandle, state: &AppState) {
     state.flags.start_hidden.store(state.startup.hidden && tray, Ordering::SeqCst);
     // the uninstaller removes the entry, and an update may have moved the app
     if state.settings().open_at_login.is_some() {
-        apply_login_item(state);
-    }
-}
-
-/// `applyLoginItem`: registers or removes the start with the system (`settings.openAtLogin`),
-/// which starts the app with `--hidden` (the autostart plugin in `lib.rs`). Only the installed
-/// app has a stable path to register, and Linux has no such entry.
-pub fn apply_login_item(state: &AppState) {
-    if tauri::is_dev() || cfg!(target_os = "linux") {
-        return;
-    }
-    let Some(autostart) = state.app.try_state::<tauri_plugin_autostart::AutoLaunchManager>() else { return };
-    let on = state.settings().open_at_login == Some(true);
-    match if on { autostart.enable() } else { autostart.disable() } {
-        Ok(()) => log::info!("start with the system: {}", if on { "on" } else { "off" }),
-        Err(e) => log::warn!("start with the system: {e}"),
+        crate::app::login_item::apply(state, false);
     }
 }
 
@@ -215,9 +200,11 @@ pub fn shutdown(state: &AppState) {
 }
 
 /// The run loop's events. `Exit` is also how Windows ending the session (logoff, shutdown, an
-/// installer's restart manager) arrives: the event loop ends on `WM_ENDSESSION` and the process
-/// exits right after, so the tabs are saved there. Quitting from the window, the tray or Cmd+Q
-/// asks first and arrives here already shut down (`quit::request_quit`).
+/// installer's restart manager) arrives: tao turns `WM_ENDSESSION` into the normal exit path (it
+/// ends the event loop, which Tauri reports as `RunEvent::Exit`, and then exits the process
+/// itself), so [`shutdown`] saves the tabs there, synchronously, as the `session-end` handler of
+/// the Electron version did. Quitting from the window, the tray or Cmd+Q asks first and arrives
+/// here already shut down (`quit::request_quit`).
 pub fn on_run_event(app: &AppHandle, event: RunEvent) {
     match event {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {

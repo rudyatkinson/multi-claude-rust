@@ -61,14 +61,17 @@ pub fn run() {
         app::boot::isolate(&mut context, &root);
     }
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // first, so that a second start hands over its arguments before anything else happens
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| app::boot::second_instance(app, argv)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .plugin(tauri_plugin_notification::init());
+    // Windows writes its Run value itself (`app::login_item`), the one the uninstaller removes
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])));
+    let app = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(move |app| app::boot::setup(app, root, startup))

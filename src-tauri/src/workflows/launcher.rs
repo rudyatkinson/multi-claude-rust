@@ -44,6 +44,11 @@ fn refused(message: impl Into<String>) -> AppError {
     AppError::refused(message)
 }
 
+/// Runs file work on a thread where blocking is fine, off the async runtime's own.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> AppResult<T> {
+    tokio::task::spawn_blocking(work).await.map_err(|e| AppError::io(e.to_string()))
+}
+
 /// A text that JavaScript takes for true.
 fn truthy(value: Option<&str>) -> Option<&str> {
     value.filter(|v| !v.is_empty())
@@ -76,7 +81,10 @@ pub async fn start_step<D: LauncherDeps + ?Sized>(
 
     let dir = run_folder(&deps.runs_dir(), &run.id);
     let text = render_prompt(&def.prompt, &prompt_values(run, index));
-    let prompt_file = write_step_prompt(&dir, index, &def.name, &text)?;
+    let prompt_file = {
+        let (dir, name) = (dir.clone(), def.name.clone());
+        blocking(move || write_step_prompt(&dir, index, &name, &text)).await??
+    };
 
     let request = SessionRequest {
         profile_id: profile.id.clone(),
@@ -126,13 +134,22 @@ pub async fn start_step<D: LauncherDeps + ?Sized>(
     if holder.id != profile.id {
         let plan = plan_transfer(&deps.config_dir(&holder), &deps.config_dir(&profile), &conversation, reported.as_deref())
             .ok_or_else(|| refused(format!("The conversation of \"{starter}\" was not found on \"{}\".", holder.name)))?;
-        if !can_replace(&plan).map_err(|e| AppError::io(e.to_string()))? {
+        // false: the account has the conversation already, with another continuation
+        let copied = blocking(move || -> AppResult<bool> {
+            let io = |e: std::io::Error| AppError::io(e.to_string());
+            if !can_replace(&plan).map_err(io)? {
+                return Ok(false);
+            }
+            copy_conversation(&plan).map_err(io)?;
+            Ok(true)
+        })
+        .await??;
+        if !copied {
             return Err(refused(format!(
                 "\"{}\" already has the conversation of \"{starter}\" with a different continuation.",
                 profile.name
             )));
         }
-        copy_conversation(&plan).map_err(|e| AppError::io(e.to_string()))?;
     } else if find_transcript(&deps.config_dir(&profile), &conversation, reported.as_deref()).is_none() {
         return Err(refused(format!("The conversation of \"{starter}\" was not found.")));
     }

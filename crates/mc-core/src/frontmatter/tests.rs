@@ -298,11 +298,59 @@ fn parse_names_tabs_and_second_documents() {
     assert_eq!(nested.message, "A line is indented with a tab; YAML wants spaces.");
     let docs = parse_doc("---\nname: x\n...\nfoo: bar\n---\n").error.unwrap();
     assert_eq!(docs.line, Some(4));
+    // a `...` line ends the first document also when nothing comes before it, and `yaml` reads
+    // the first document only
+    let several = "The frontmatter holds more than one YAML document.";
+    let first = parse_doc("---\n...\nname: x\n---\n");
+    assert_eq!(first.error, Some(FmError { message: several.into(), line: Some(3) }));
+    assert!(first.keys.is_empty());
+    let commented = parse_doc("---\n# c\n...\nname: x\n---");
+    assert_eq!(commented.error, Some(FmError { message: several.into(), line: Some(4) }));
+    assert!(commented.keys.is_empty());
+    assert_eq!(parse_doc("---\nname: x\n... # end\nfoo: bar\n---\n").error.unwrap().line, Some(4));
+    // only comments and empty lines after it, or a `...` that is text: one document
+    assert_eq!(parse_doc("---\nname: x\n...\n# notes\n\n---\n").error, None);
+    assert_ne!(parse_doc("---\nname: x\n...more: y\n---\n").error.map(|e| e.message), Some(several.into()));
     // a key written twice in a nested map counts too
     assert!(parse_doc("---\nhooks:\n  Stop: a\n  Stop: b\n---\n").error.is_some());
     // what was read up to the error still counts
     let broken = parse_doc("---\nname: x\ndescription: Use when: it rains\n---\n");
     assert_eq!(name_of(&broken).as_deref(), Some("x"));
+}
+
+#[test]
+fn a_line_of_white_space_with_a_tab_must_not_stand_left_of_its_block_scalar() {
+    let first_line = "Block scalar lines must not be less indented than their first line";
+    let read = read_frontmatter("description: |\n  two\n\t\nname: x");
+    assert_eq!(read.error, Some(FmError { message: first_line.into(), line: Some(3) }));
+    // `yaml` reads on: the fields still count
+    assert_eq!(read.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["description", "name"]);
+    assert_eq!(read_frontmatter("description: >\n  two\n \t \nname: x\n").error.unwrap().line, Some(3));
+    assert_eq!(read_frontmatter("hooks:\n  a: |\n    two\n  \t\n  b: x\n").error.unwrap().line, Some(4));
+    let indicator = read_frontmatter("description: |2\n   two\n \t\nname: x\n").error.unwrap();
+    assert_eq!(indicator.message, "Block scalar lines must not be less indented than their explicit indentation indicator");
+    // as far in as the content, or spaces only: fine
+    assert_eq!(read_frontmatter("description: |\n  two\n  \t\nname: x\n").error, None);
+    assert_eq!(read_frontmatter("description: |\n  two\n \nname: x\n").error, None);
+    // in a whole file the line counts the fence
+    assert_eq!(parse_doc("---\ndescription: |\n  two\n\t\nname: x\n---\n").error.unwrap().line, Some(4));
+}
+
+#[test]
+fn names_the_alias_whose_anchor_is_missing() {
+    let error = parse_doc("---\na: &x 1\nb: *y\n---\n").error.unwrap();
+    assert_eq!(error, FmError { message: "An alias (*y) points to an anchor (&y) that is not defined.".into(), line: Some(3) });
+    assert_eq!(parse_doc("---\nlist: [*gone, b]\n---\n").error.unwrap().message, "An alias (*gone) points to an anchor (&gone) that is not defined.");
+}
+
+#[test]
+fn reads_a_last_line_without_a_line_feed_that_ends_in_a_wide_character() {
+    let read = read_frontmatter("name: Ã©");
+    assert_eq!(read.error, None);
+    assert_eq!(read.entries.len(), 1);
+    assert_eq!((read.entries[0].range.clone(), read.entries[0].value.string.as_deref()), (0.."name: Ã©".len(), Some("Ã©")));
+    let read = read_frontmatter("name: x\n# Ã¼");
+    assert_eq!(read.entries[0].range, 0.."name: x\n".len());
 }
 
 #[test]

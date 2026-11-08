@@ -41,6 +41,10 @@ pub fn flush_pending(state: &AppState) {
 
 /// `restoreTabs`: reopens the tabs of the last run. Each continues its conversation, or starts
 /// fresh if it never had one; all are announced at once, with the arrangement they belong in.
+///
+/// From the first session started until that announcement, what the window reports of its
+/// layout is ignored (`ui:layout`, see [`Flags::restoring_layout`](crate::state::Flags)): it is
+/// the layout from before the restore and would take the place of the restored one.
 fn restore_tabs(state: &AppState) {
     if state.settings().restore_tabs == Some(false) || state.claude_path().is_none() {
         return;
@@ -49,6 +53,14 @@ fn restore_tabs(state: &AppState) {
     if plan.requests.is_empty() && plan.panels.is_empty() {
         return;
     }
+    struct Restoring<'a>(&'a AppState);
+    impl Drop for Restoring<'_> {
+        fn drop(&mut self) {
+            self.0.flags.restoring_layout.store(false, Ordering::SeqCst);
+        }
+    }
+    state.flags.restoring_layout.store(true, Ordering::SeqCst);
+    let _restoring = Restoring(state);
     let started: Vec<Option<String>> = plan
         .requests
         .iter()
@@ -72,8 +84,8 @@ fn restore_tabs(state: &AppState) {
         })
         .collect();
     let live: Vec<String> = state.sessions.list().into_iter().map(|s| s.id).collect();
-    state.tabs.note_layout(restored_layout(&plan, &started, &live));
+    let layout = restored_layout(&plan, &started, &live);
+    state.tabs.note_layout(layout.clone());
     // the list that introduces the sessions carries the arrangement
-    state.flags.layout_to_send.store(true, Ordering::SeqCst);
-    state.sessions.announce();
+    state.sessions.emit_changed(Some(layout));
 }

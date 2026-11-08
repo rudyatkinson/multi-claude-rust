@@ -23,10 +23,13 @@ pub const END_BEFORE_COPY_MS: u64 = 3000;
 /// conversation off. Between ending and starting again the tab is marked as moving, so that it
 /// is not restarted or moved a second time; the mark goes again when the move fails.
 pub async fn transfer_session(state: &AppState, id: &str, target_profile_id: &str, auto: bool) -> AppResult<SessionInfo> {
-    if state.sessions.get(id).is_some_and(|info| info.moving) {
+    if state.sessions.get(id).is_none() {
+        return Err(AppError::refused("Session not found"));
+    }
+    if !state.sessions.try_set_moving(id) {
         return Err(AppError::refused("This conversation is already being moved."));
     }
-    state.sessions.set_moving(id, true);
+    state.sessions.announce();
     let moved = move_conversation(state, id, target_profile_id, auto).await;
     // the tab that arrived over there has another id; this one is only still there when the move failed
     state.sessions.set_moving(id, false);
@@ -65,7 +68,14 @@ async fn move_conversation(state: &AppState, id: &str, target_profile_id: &str, 
     let (Some(conversation), Some(plan)) = (conversation, plan) else {
         return replace_session(state, id, &request);
     };
-    if !can_replace(&plan).map_err(|e| AppError::io(e.to_string()))? {
+    // reads the whole copy over there, if there is one
+    let (plan, replaceable) = tauri::async_runtime::spawn_blocking(move || {
+        let replaceable = can_replace(&plan);
+        (plan, replaceable)
+    })
+    .await
+    .map_err(|e| AppError::io(e.to_string()))?;
+    if !replaceable.map_err(|e| AppError::io(e.to_string()))? {
         return Err(AppError::refused(format!(
             "\"{}\" already has this conversation with a different continuation. Open it there with \"From history\" instead.",
             target.name

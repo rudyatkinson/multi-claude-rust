@@ -167,6 +167,14 @@ impl OutputBuffer {
 /// answers it at once (the cursor of a fresh terminal is at 1;1) and the window never sees the
 /// request: an answer from the window, which may attach much later or again after a reload,
 /// would reach the program as typed text.
+///
+/// Newer consoles switch modes first (`ESC [ ? 9001 h` for the win32 input mode portable-pty asks
+/// for, `ESC [ ? 1004 h` for focus reports), so private mode sequences in front of the request
+/// are passed on and looked past, for at most [`DSR_SCAN_LIMIT`] bytes.
+///
+/// Not asking for the request at all would be better, but portable-pty 0.9 passes its creation
+/// flags to `CreatePseudoConsole` as constants (`win/psuedocon.rs`): no feature, environment
+/// variable or `PtySystem` option changes them, short of a fork of the crate. Hence this filter.
 #[derive(Debug)]
 pub struct StartupDsr {
     seen: Vec<u8>,
@@ -177,6 +185,71 @@ pub struct StartupDsr {
 pub const DSR_REQUEST: &[u8] = b"\x1b[6n";
 /// The answer: row 1, column 1.
 pub const DSR_ANSWER: &[u8] = b"\x1b[1;1R";
+/// How far into the output the request is looked for, past the mode sequences in front of it.
+pub const DSR_SCAN_LIMIT: usize = 64;
+
+/// What the start of the output is, as far as the startup request goes.
+#[derive(Debug, PartialEq, Eq)]
+enum Scan {
+    /// The request begins at this byte, after mode sequences only.
+    Found(usize),
+    /// Not enough output yet to tell.
+    Wait,
+    /// Something else came first: there is no request to answer.
+    Absent,
+}
+
+/// How a private mode sequence (`ESC [ ? <digits> h` or `... l`) at the start of some output stands.
+enum Mode {
+    /// One of this many bytes.
+    Complete(usize),
+    /// Could still become one.
+    Incomplete,
+    No,
+}
+
+fn private_mode(bytes: &[u8]) -> Mode {
+    const START: &[u8] = b"\x1b[?";
+    if bytes.len() < START.len() {
+        return if START.starts_with(bytes) { Mode::Incomplete } else { Mode::No };
+    }
+    if !bytes.starts_with(START) {
+        return Mode::No;
+    }
+    let digits = bytes[START.len()..].iter().take_while(|b| b.is_ascii_digit() || **b == b';').count();
+    match bytes.get(START.len() + digits) {
+        None => Mode::Incomplete,
+        Some(b'h' | b'l') if digits > 0 => Mode::Complete(START.len() + digits + 1),
+        Some(_) => Mode::No,
+    }
+}
+
+/// Looks past the mode sequences at the start of `seen` for the request.
+fn scan(seen: &[u8]) -> Scan {
+    let mut at = 0;
+    loop {
+        if at >= DSR_SCAN_LIMIT {
+            return Scan::Absent;
+        }
+        let rest = &seen[at..];
+        if rest.starts_with(DSR_REQUEST) {
+            return Scan::Found(at);
+        }
+        let waiting = if rest.len() < DSR_REQUEST.len() && DSR_REQUEST.starts_with(rest) {
+            true
+        } else {
+            match private_mode(rest) {
+                Mode::Complete(len) => {
+                    at += len;
+                    continue;
+                }
+                Mode::Incomplete => true,
+                Mode::No => false,
+            }
+        };
+        return if waiting && seen.len() < DSR_SCAN_LIMIT { Scan::Wait } else { Scan::Absent };
+    }
+}
 
 /// What [`StartupDsr::filter`] made of a read.
 #[derive(Debug, PartialEq, Eq)]
@@ -197,20 +270,26 @@ impl StartupDsr {
         self.done
     }
 
-    /// Looks for the request at the very start of the output, and only there.
+    /// Looks for the request at the very start of the output (past mode sequences), and only there.
     pub fn filter(&mut self, bytes: &[u8]) -> Filtered {
         if self.done {
             return Filtered { output: bytes.to_vec(), answer: false };
         }
         self.seen.extend_from_slice(bytes);
-        if self.seen.len() < DSR_REQUEST.len() && DSR_REQUEST.starts_with(&self.seen) {
+        let found = match scan(&self.seen) {
             // could still be the request: wait for the rest of it
-            return Filtered { output: Vec::new(), answer: false };
-        }
+            Scan::Wait => return Filtered { output: Vec::new(), answer: false },
+            Scan::Found(at) => Some(at),
+            Scan::Absent => None,
+        };
         self.done = true;
-        let seen = std::mem::take(&mut self.seen);
-        match seen.strip_prefix(DSR_REQUEST) {
-            Some(rest) => Filtered { output: rest.to_vec(), answer: true },
+        let mut seen = std::mem::take(&mut self.seen);
+        match found {
+            Some(at) => {
+                // the mode sequences in front of it go on to the window
+                seen.drain(at..at + DSR_REQUEST.len());
+                Filtered { output: seen, answer: true }
+            }
             None => Filtered { output: seen, answer: false },
         }
     }
@@ -375,5 +454,53 @@ mod tests {
         // inactive: everything passes
         let mut off = StartupDsr::new(false);
         assert_eq!(off.filter(b"\x1b[6n"), Filtered { output: b"\x1b[6n".to_vec(), answer: false });
+    }
+
+    #[test]
+    fn mode_sequences_before_the_startup_request_are_passed_on() {
+        let start = b"\x1b[?1004h\x1b[?9001h\x1b[6n\x1b[c";
+        let mut dsr = StartupDsr::new(true);
+        assert_eq!(dsr.filter(start), Filtered { output: b"\x1b[?1004h\x1b[?9001h\x1b[c".to_vec(), answer: true });
+        assert!(dsr.is_done());
+        // the same one byte at a time: nothing goes on until the request is found
+        let mut pieces = StartupDsr::new(true);
+        let mut output = Vec::new();
+        let mut answers = 0;
+        for byte in start.chunks(1) {
+            let filtered = pieces.filter(byte);
+            output.extend(filtered.output);
+            answers += usize::from(filtered.answer);
+        }
+        assert_eq!((output, answers), (b"\x1b[?1004h\x1b[?9001h\x1b[c".to_vec(), 1));
+        // a cursor hidden first, and a lot of output with the request
+        let mut long = StartupDsr::new(true);
+        let mut read = b"\x1b[?25l\x1b[6n".to_vec();
+        read.extend(std::iter::repeat_n(b'x', 10_000));
+        let filtered = long.filter(&read);
+        assert!(filtered.answer);
+        assert_eq!(filtered.output.len(), 6 + 10_000);
+    }
+
+    #[test]
+    fn the_request_is_looked_for_only_so_far() {
+        // mode sequences longer than the limit: a request after them belongs to the window
+        let modes = b"\x1b[?1004h".repeat(DSR_SCAN_LIMIT / 8 + 1);
+        let mut dsr = StartupDsr::new(true);
+        let read = [modes.as_slice(), DSR_REQUEST].concat();
+        assert_eq!(dsr.filter(&read), Filtered { output: read.clone(), answer: false });
+        // endless digits are not waited for
+        let mut digits = StartupDsr::new(true);
+        let mut endless = b"\x1b[?".to_vec();
+        endless.extend(std::iter::repeat_n(b'1', DSR_SCAN_LIMIT));
+        assert_eq!(digits.filter(&endless), Filtered { output: endless.clone(), answer: false });
+        // anything else after a mode sequence ends the search
+        let mut other = StartupDsr::new(true);
+        assert_eq!(other.filter(b"\x1b[?9001hhi\x1b[6n"), Filtered { output: b"\x1b[?9001hhi\x1b[6n".to_vec(), answer: false });
+        let mut no_digits = StartupDsr::new(true);
+        assert_eq!(no_digits.filter(b"\x1b[?h\x1b[6n"), Filtered { output: b"\x1b[?h\x1b[6n".to_vec(), answer: false });
+        // a mode sequence that never ends is handed on at the end
+        let mut cut = StartupDsr::new(true);
+        assert_eq!(cut.filter(b"\x1b[?90"), Filtered { output: vec![], answer: false });
+        assert_eq!(cut.finish(), b"\x1b[?90".to_vec());
     }
 }

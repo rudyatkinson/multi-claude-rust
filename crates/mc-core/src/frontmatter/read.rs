@@ -6,8 +6,9 @@
 //! text: a plain scalar ends before a comment, a quoted one at its closing quote, a flow collection
 //! at its closing bracket, a block collection where its last entry ends.
 //!
-//! Two checks `yaml` makes are made here because yaml-rust2 does not: a key written twice in one
-//! map, and a second document after a `...` line.
+//! Three checks `yaml` makes are made here because yaml-rust2 does not: a key written twice in one
+//! map, a second document after a `...` line, and a line of white space with a tab in it that is
+//! indented less than the block scalar it stands in.
 
 use yaml_rust2::parser::{Event, Parser};
 use yaml_rust2::scanner::{Marker, ScanError, TScalarStyle};
@@ -25,6 +26,9 @@ const NOT_A_MAP: &str = "The frontmatter is not a list of \"name: value\" lines.
 const IN_BRACES: &str = "The frontmatter is written in braces on one line, which the form cannot change.";
 /// `MULTIPLE_DOCS` in `yaml`, said without its advice to call `parseAllDocuments()`.
 const SEVERAL_DOCUMENTS: &str = "The frontmatter holds more than one YAML document.";
+/// `BAD_INDENT` in `yaml` for a line of a block scalar, in `yaml`'s words.
+const LESS_THAN_FIRST_LINE: &str = "Block scalar lines must not be less indented than their first line";
+const LESS_THAN_INDICATOR: &str = "Block scalar lines must not be less indented than their explicit indentation indicator";
 
 struct Node {
     /// Byte offset in the frontmatter.
@@ -187,6 +191,13 @@ impl Builder<'_> {
         if info.contains("mapping values are not allowed") {
             self.fail(COLON_IN_VALUE, Some(line));
             self.failure = Some(Failure::Colon { line, col: err.marker().col() });
+        } else if info.contains("unknown anchor") {
+            let message = match alias_name(self.fm, self.lines.offset(err.marker())) {
+                Some(name) => format!("An alias (*{name}) points to an anchor (&{name}) that is not defined."),
+                None => "An alias points to an anchor that is not defined.".to_owned(),
+            };
+            self.fail(&message, Some(line));
+            self.failure = Some(Failure::Other);
         } else if info.split(|c: char| !c.is_ascii_alphabetic()).any(|w| w == "tab" || w == "tabs") {
             // yaml-rust2 may name the line before the one with the tab
             self.fail(TAB_INDENT, Some(first_tab_indented_line(self.fm, line).unwrap_or(line)));
@@ -198,6 +209,79 @@ impl Builder<'_> {
             self.failure = Some(Failure::Other);
         }
     }
+}
+
+/// The name of the alias (`*name`) yaml-rust2 marks at `at`.
+fn alias_name(fm: &str, at: usize) -> Option<&str> {
+    let line_end = fm[at.min(fm.len())..].find('\n').map_or(fm.len(), |i| at + i);
+    let star = at + fm[at..line_end].find('*')?;
+    let name = &fm[star + 1..line_end];
+    let len = name.find(|c: char| c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}')).unwrap_or(name.len());
+    (len > 0).then(|| &name[..len])
+}
+
+/// `MULTIPLE_DOCS` in `yaml` after a `...` line, which ends the document (alone on its line, or
+/// followed by white space or a comment): the first line after it that is neither empty nor a
+/// comment starts another one. yaml-rust2 does not see that one when the `...` is the first line.
+/// Where the `...` line begins and the line (from 1) of the second document.
+fn second_document(fm: &str) -> Option<(usize, usize)> {
+    let mut offset = 0;
+    let mut ended = None;
+    for (index, line) in fm.split('\n').enumerate() {
+        match ended {
+            None => {
+                let ends = line.strip_prefix("...").is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t', '#']));
+                if ends {
+                    ended = Some(offset);
+                }
+            }
+            Some(at) => {
+                let content = js_trim(line);
+                if !content.is_empty() && !content.starts_with('#') {
+                    return Some((at, index + 1));
+                }
+            }
+        }
+        offset += line.len() + 1;
+    }
+    None
+}
+
+/// `BAD_INDENT` in `yaml` for the block scalar whose `|` or `>` stands at `header`: a line of
+/// white space with a tab in it that has fewer spaces in front than the scalar's content (the
+/// first line of it, or the indentation indicator). A line with text that is indented less ends
+/// the scalar. The line (from 1) and what `yaml` says of it.
+fn block_scalar_bad_indent(fm: &str, header: usize) -> Option<(usize, &'static str)> {
+    let spaces = |s: &str| s.len() - s.trim_start_matches(' ').len();
+    // the indentation of the map or list the scalar is a value of
+    let parent = spaces(&fm[line_start(fm, header)..]);
+    let header_end = header + fm[header..].find('\n')?;
+    let indicator = fm[header + 1..header_end]
+        .bytes()
+        .take_while(|b| !matches!(b, b' ' | b'\t' | b'#'))
+        .find(u8::is_ascii_digit)
+        .map(|d| usize::from(d - b'0'));
+    let message = if indicator.is_some() { LESS_THAN_INDICATOR } else { LESS_THAN_FIRST_LINE };
+    let mut content = indicator.map(|n| parent + n);
+    let mut number = fm[..header].matches('\n').count() + 1;
+    for line in fm[header_end + 1..].split('\n') {
+        number += 1;
+        let indent = spaces(line);
+        let rest = &line[indent..];
+        // only spaces: an empty line of the scalar
+        if rest.is_empty() {
+            continue;
+        }
+        let blank = rest.chars().all(|c| c == ' ' || c == '\t');
+        match content {
+            None if indent <= parent && !blank => return None,
+            None => content = Some(indent),
+            Some(want) if indent >= want => {}
+            Some(_) if blank => return Some((number, message)),
+            Some(_) => return None,
+        }
+    }
+    None
 }
 
 /// The first line, from `from` on, whose indentation holds a tab.
@@ -282,7 +366,14 @@ fn build(fm: &str, parse: &str, shifts: &[usize]) -> Tree {
             Event::Scalar(value, style, _, tag) => {
                 let empty = style == TScalarStyle::Plain && value.is_empty();
                 let start = match style {
-                    TScalarStyle::Literal | TScalarStyle::Folded => block_header_start(fm, at).unwrap_or(at),
+                    TScalarStyle::Literal | TScalarStyle::Folded => {
+                        let header = block_header_start(fm, at);
+                        // `yaml` reads on after it, so the fields still count
+                        if let Some((line, message)) = header.and_then(|h| block_scalar_bad_indent(fm, h)) {
+                            b.fail(message, Some(line));
+                        }
+                        header.unwrap_or(at)
+                    }
                     _ => at,
                 };
                 let tag = tag.map(|t| (t.handle, t.suffix));
@@ -622,8 +713,13 @@ fn root_limit(fm: &str, from: usize, to: usize) -> usize {
 }
 
 pub(super) fn read_frontmatter(fm: &str) -> Parsed {
-    let (tree, broken) = build_mended(fm);
+    // `yaml` reads the first document and says that there is another; the fields end before it
+    let second = second_document(fm);
+    let (tree, broken) = build_mended(second.map_or(fm, |(at, _)| &fm[..at]));
     let mut error = tree.error;
+    if let Some((_, line)) = second.filter(|_| error.is_none()) {
+        error = Some(FmError { message: SEVERAL_DOCUMENTS.to_owned(), line: Some(line) });
+    }
     let Some(mut root) = tree.root else { return Parsed { entries: Vec::new(), error } };
     for (start, end) in broken {
         mark_broken(&mut root, start, end);

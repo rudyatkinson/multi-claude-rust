@@ -33,6 +33,8 @@ pub struct AppState {
     pub auto_switch: crate::auto_switch::AutoSwitch,
     /// The past conversations of the accounts, as last listed.
     pub conversations: Mutex<mc_core::conversations::ConversationIndex>,
+    /// One listing of the conversations at a time; held while their files are read.
+    pub conversation_scan: Mutex<()>,
     /// "Open in Multi Claude" in File Explorer.
     pub explorer_menu: crate::explorer_menu::ExplorerMenu,
     // Phase 3: the Library services
@@ -72,8 +74,9 @@ pub struct Flags {
     pub window_shown: AtomicBool,
     /// The tabs of the last run were reopened (once per run of the app, not per page load).
     pub tabs_restored: AtomicBool,
-    /// The next session list carries the restored arrangement.
-    pub layout_to_send: AtomicBool,
+    /// The tabs of the last run are being reopened: their arrangement is on its way to the
+    /// window, and what the window reports of its layout until then is ignored.
+    pub restoring_layout: AtomicBool,
     /// The app is shutting down: ending the sessions must not empty the saved tabs.
     pub quitting: AtomicBool,
     /// The window stays hidden at the start: `--hidden`, and a tray icon to bring it back with.
@@ -119,6 +122,7 @@ impl AppState {
             runs: crate::workflows::WorkflowRuns::new(Arc::new(crate::workflows::AppRuns(app.clone()))),
             auto_switch: crate::auto_switch::AutoSwitch::new(Arc::new(crate::auto_switch::AppSwitch(app.clone()))),
             conversations: Mutex::default(),
+            conversation_scan: Mutex::new(()),
             explorer_menu: crate::explorer_menu::ExplorerMenu::for_this_build(os_build),
             skills: crate::skills::SkillService::new(app.clone(), root.clone()),
             agents: crate::agents::AgentService::new(app.clone(), root.clone()),

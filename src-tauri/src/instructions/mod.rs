@@ -25,7 +25,7 @@ use mc_core::error::{AppError, AppResult};
 use mc_core::folders::folder_key;
 use mc_core::instructions::{fixed_files, rule_name_problem, rule_title, rules_dir, starter_text};
 use mc_core::jsstr::longer16;
-use mc_core::text_file::{busy_message, create_text, is_busy, read_text, retry_busy, save_text, TextRead, BUSY_TRIES, BUSY_WAIT, GONE};
+use mc_core::text_file::{create_text, read_text, save_text, TextRead, GONE};
 use mc_core::types::{
     InstructionDetail, InstructionFile, InstructionKind, InstructionRef, InstructionSaveResult, InstructionScope, InstructionScopeKind,
     InstructionTarget, LoadStep, SaveOutcome, SessionKind, SKILL_LIMITS,
@@ -36,6 +36,7 @@ use tauri_plugin_opener::OpenerExt;
 
 pub use scan::{find_rules, find_scopes, list_files, load_order, InstructionAccount, LoadInputs, ScopeSpec};
 
+use crate::library::trash::{delete_item, system_trash, TrashFn};
 use crate::state::AppState;
 
 const WINDOWS: bool = cfg!(windows);
@@ -202,17 +203,9 @@ impl InstructionService {
     /// the bin is never deleted for good instead.
     pub fn delete(&self, r: &InstructionRef) -> AppResult<()> {
         let (scope, abs) = self.locate(r)?;
-        if fs::symlink_metadata(&abs)?.file_type().is_symlink() {
-            fs::remove_file(&abs)?;
-        } else {
-            retry_busy(|| self.deps.trash(&abs), BUSY_TRIES, BUSY_WAIT).map_err(|err| {
-                if is_busy(&err) {
-                    busy_message(err, "Deleting")
-                } else {
-                    AppError::io(format!("The file could not be moved to the bin ({err}). It was not deleted."))
-                }
-            })?;
-        }
+        let deps = Arc::clone(&self.deps);
+        let trash: TrashFn = Arc::new(move |file: &Path| deps.trash(file));
+        delete_item(&trash, &abs, "file")?;
         if scope.scope.kind == InstructionScopeKind::Account {
             self.deps.account_changed();
         }
@@ -336,21 +329,6 @@ pub fn own_memory_dir(config_dir: &Path, cwd: &Path) -> Option<PathBuf> {
     Some(projects.join(on_disk.unwrap_or(key)).join("memory"))
 }
 
-/// What a failure of the bin means as an I/O error: a file in use is told as such, so that it is
-/// tried again and worded as busy; anything else keeps the bin's own words.
-fn trash_error(err: trash::Error) -> io::Error {
-    #[cfg(windows)]
-    if let trash::Error::Os { code, .. } = &err {
-        // HRESULT_FROM_WIN32 of a sharing or lock violation, and the copy engine's own
-        // COPYENGINE_E_SHARING_VIOLATION_SRC / _DEST
-        match *code as u32 {
-            0x8007_0020 | 0x8027_0027 | 0x8027_0028 => return io::Error::from_raw_os_error(32),
-            0x8007_0021 => return io::Error::from_raw_os_error(33),
-            _ => {}
-        }
-    }
-    io::Error::other(err.to_string())
-}
 
 /// The deps of the app: everything read from `AppState` at the time of the call.
 struct AppDeps {
@@ -408,7 +386,7 @@ impl InstructionDeps for AppDeps {
     }
 
     fn trash(&self, file: &Path) -> io::Result<()> {
-        trash::delete(file).map_err(trash_error)
+        system_trash(file)
     }
 
     fn account_changed(&self) {

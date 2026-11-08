@@ -196,6 +196,12 @@ impl ConversationIndex {
         &self.entries
     }
 
+    /// An index with what this one read of the files and no listing, to list with while this one
+    /// still answers [`find`](Self::find) from its last listing; put it in this one's place after.
+    pub fn take_reading(&mut self) -> ConversationIndex {
+        ConversationIndex { cache: std::mem::take(&mut self.cache), entries: Vec::new() }
+    }
+
     /// A conversation from the last listing.
     pub fn find(&self, profile_id: &str, id: &str) -> Option<&ConversationEntry> {
         self.entries.iter().find(|e| e.profile_id == profile_id && e.id == id)
@@ -343,5 +349,25 @@ mod tests {
         cache.insert(dir.path().join("elif").join("projects").join("k").join("x.jsonl"), (time, size, None));
         scan_profile(&dir.path().join("main"), "main", &mut cache);
         assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn lists_with_what_was_read_while_the_last_listing_still_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = write(dir.path(), "main", "C--code-app", ID, &[user("one")]);
+        let profiles = [("main", dir.path().join("main"))];
+        let mut shared = ConversationIndex::new();
+        shared.list(&profiles);
+        let mut reading = shared.take_reading();
+        // the old index still finds what it listed; the readings went with the new one
+        assert_eq!(shared.find("main", ID).map(|e| e.title.as_str()), Some("one"));
+        assert!(shared.cache.is_empty() && reading.entries().is_empty());
+        let (time, size, _) = reading.cache[&file].clone();
+        let mut cached = summary(&file).unwrap();
+        cached.title = "from the cache".into();
+        reading.cache.insert(file.clone(), (time, size, Some(cached)));
+        assert_eq!(reading.list(&profiles)[0].title, "from the cache");
+        shared = reading;
+        assert_eq!(shared.find("main", ID).map(|e| e.title.as_str()), Some("from the cache"));
     }
 }

@@ -23,6 +23,21 @@ pub mod memory;
 pub mod skills;
 pub mod updater;
 
+/// Runs `work` with the app's state on a thread where blocking is fine: what starts processes or
+/// reads and writes files stays off the window's thread and the async runtime's own.
+pub(crate) async fn blocking<T: Send + 'static>(
+    app: &tauri::AppHandle,
+    work: impl FnOnce(&crate::state::AppState) -> crate::error::CmdResult<T> + Send + 'static,
+) -> crate::error::CmdResult<T> {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || match crate::app::state(&app) {
+        Some(state) => work(&state),
+        None => Err(crate::error::CmdError("Multi Claude is shutting down.".into())),
+    })
+    .await
+    .map_err(|e| crate::error::CmdError(e.to_string()))?
+}
+
 /// Defines [`handler`] and the list of the names it registers from one list of commands.
 macro_rules! registry {
     ($($module:ident :: $name:ident),* $(,)?) => {

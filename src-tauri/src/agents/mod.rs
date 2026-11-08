@@ -11,16 +11,14 @@ mod scan;
 mod tests;
 
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use mc_core::agents::{agent_clashes, agent_key, agent_name_problem, agent_stem, new_agent_text, NamedAgent};
 use mc_core::error::{AppError, AppResult};
 use mc_core::frontmatter::{name_of, parse_doc, set_field};
 use mc_core::text_file::{
-    busy_message, create_text, decode, encode, is_busy, read_text, retry_busy, save_text, write_file_atomic, TextRead, BUSY_TRIES,
-    BUSY_WAIT,
+    create_text, decode, encode, read_text, retry_busy, save_text, write_file_atomic, TextRead, BUSY_TRIES, BUSY_WAIT,
 };
 use mc_core::types::{
     AgentDetail, AgentListing, AgentMoved, AgentRef, AgentSaveResult, AgentSummary, SaveOutcome, SessionKind, TransferMode, SKILL_LIMITS,
@@ -28,8 +26,10 @@ use mc_core::types::{
 use tauri::AppHandle;
 
 use crate::config_store::ConfigStore;
+use crate::library::trash::{delete_item, system_trash_fn};
 use crate::state::{lock, AppState};
 
+pub use crate::library::trash::TrashFn;
 pub use roots::{find_roots, pin_folder, project_root_of, unpin_root, ProfileFolder, RootInputs, RootSpec, PINNED_MAX};
 pub use scan::{find_agents, summarize, MAX_FILES};
 
@@ -37,43 +37,6 @@ const GONE: &str = "That agent is no longer there. The list may be out of date."
 const NOT_LISTED: &str = "That folder is no longer in the list.";
 const FIX_FIRST: &str = "The frontmatter of this agent cannot be read. Fix it in the Source tab first.";
 
-/// Moves a file to the system's bin. Fails when there is none for that drive.
-pub type TrashFn = Arc<dyn Fn(&Path) -> io::Result<()> + Send + Sync>;
-
-/// `shell.trashItem`: the system's bin through the `trash` crate. Windows' reasons come back as OS
-/// errors, so that a file in use is told apart (see [`is_busy`]).
-///
-/// On a thread of its own: on Windows the bin is reached through COM, and the `trash` crate panics
-/// on a thread that other code set up for COM another way.
-fn trash_file(path: &Path) -> io::Result<()> {
-    let path = path.to_path_buf();
-    std::thread::spawn(move || trash::delete(&path).map_err(trash_error))
-        .join()
-        .unwrap_or_else(|_| Err(io::Error::other("The system's bin could not be reached.")))
-}
-
-fn trash_error(err: trash::Error) -> io::Error {
-    #[cfg(windows)]
-    if let trash::Error::Os { code, .. } = &err {
-        let code = *code as u32;
-        let win32 = match code {
-            // COPYENGINE_E_ACCESS_DENIED_SRC, _SHARING_VIOLATION_SRC, _DIR_NOT_EMPTY
-            0x8027_0021 => Some(5),
-            0x8027_0027 => Some(32),
-            0x8027_003D => Some(145),
-            // HRESULT_FROM_WIN32
-            c if c & 0xFFFF_0000 == 0x8007_0000 => Some(c & 0xFFFF),
-            _ => None,
-        };
-        if let Some(win32) = win32 {
-            return io::Error::from_raw_os_error(win32 as i32);
-        }
-    }
-    match err {
-        trash::Error::Os { description, .. } | trash::Error::Unknown { description } => io::Error::other(description),
-        other => io::Error::other(other.to_string()),
-    }
-}
 
 /// `libraryRoots('agents')`'s inputs as the app has them now: the accounts, the folders of the
 /// Claude sessions and the recent folders, and the folders the user added to the Library.
@@ -126,7 +89,7 @@ pub struct AgentService {
 impl AgentService {
     /// The service of the app: deleted agents go to the system's bin.
     pub fn new(app: AppHandle, _root: PathBuf) -> Self {
-        Self::with_parts(Some(app), Arc::new(trash_file))
+        Self::with_parts(Some(app), system_trash_fn())
     }
 
     /// A service from its parts. Without an app handle nothing can be shown in the file manager
@@ -308,17 +271,7 @@ impl AgentService {
     }
 
     fn remove_located(&self, abs: &Path) -> AppResult<()> {
-        if fs::symlink_metadata(abs)?.file_type().is_symlink() {
-            fs::remove_file(abs)?;
-            return Ok(());
-        }
-        retry_busy(|| (self.trash)(abs), BUSY_TRIES, BUSY_WAIT).map_err(|err| {
-            if is_busy(&err) {
-                busy_message(err, "Deleting")
-            } else {
-                AppError::io(format!("The agent could not be moved to the bin ({err}). It was not deleted."))
-            }
-        })
+        delete_item(&self.trash, abs, "agent")
     }
 
     /// `agents:transfer`: copies an agent into another root, or moves it there (a copy, then the

@@ -72,20 +72,27 @@ pub fn sessions_attach(state: State<'_, AppState>, id: String) -> CmdResult<Opti
     Ok(state.sessions.attach(id))
 }
 
-/// `sessions:close`.
+/// `sessions:close`. Closing a pseudoconsole and cleaning up the session's files may take a moment:
+/// off the window's thread.
 #[tauri::command]
-pub fn sessions_close(state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    let id = validate::id(&id, "session")?;
-    state.sessions.close(id);
-    Ok(())
+pub async fn sessions_close(app: AppHandle, id: String) -> CmdResult<()> {
+    validate::id(&id, "session")?;
+    super::blocking(&app, move |state| {
+        state.sessions.close(&id);
+        Ok(())
+    })
+    .await
 }
 
 /// `sessions:closeMany`: at most 500 ids, with one announcement.
 #[tauri::command]
-pub fn sessions_close_many(state: State<'_, AppState>, ids: Vec<String>) -> CmdResult<()> {
-    let ids = validate::ids_many(&ids)?;
-    state.sessions.close_many(&ids);
-    Ok(())
+pub async fn sessions_close_many(app: AppHandle, ids: Vec<String>) -> CmdResult<()> {
+    validate::ids_many(&ids)?;
+    super::blocking(&app, move |state| {
+        state.sessions.close_many(&ids);
+        Ok(())
+    })
+    .await
 }
 
 /// `sessions:rename`: `tabName(name)`; a name that is empty once cleaned gives the tab its

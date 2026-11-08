@@ -220,9 +220,10 @@ fn js_trim_end(s: &str) -> &str {
     s.trim_end_matches(is_js_space)
 }
 
-/// Where the line that holds `offset` begins.
+/// Where the line that holds the byte at `offset` begins. `offset` may fall inside a character
+/// (the last byte of a text is): the search is over bytes, and a line feed is never part of one.
 fn line_start(text: &str, offset: usize) -> usize {
-    text[..offset].rfind('\n').map_or(0, |i| i + 1)
+    text.as_bytes()[..offset.min(text.len())].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1)
 }
 
 /// Moves an end back over empty lines and comments that start a line: they go with what follows.

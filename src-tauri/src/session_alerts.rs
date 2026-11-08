@@ -276,10 +276,10 @@ impl TauriOutput {
                 }
                 let Some(shown) = performed.notification() else { return };
                 let Some(id) = lock(&clicks).session_of.get(&shown.id()).cloned() else { return };
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    let _ = win.set_focus();
+                // as from the tray: a first appearance also lets the restored tabs through, and a
+                // refused focus change flashes the taskbar button
+                if let Some(state) = crate::app::state(&app) {
+                    crate::app::window::bring_to_front(&state);
                 }
                 events::emit(&app, events::SESSIONS_ACTIVATE, Activate { id });
             });

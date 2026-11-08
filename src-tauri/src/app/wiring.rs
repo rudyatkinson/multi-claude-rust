@@ -64,8 +64,8 @@ fn wire_sessions(app: &AppHandle, state: &AppState) {
         state.alerts.prune(list.iter().map(|s| s.id.as_str()));
         state.runs.sessions_changed(list.iter().map(RunSession::from).collect());
         crate::tray::refresh(&handle);
-        // a restored arrangement travels with the list that introduces its sessions, and only with it
-        state.flags.layout_to_send.swap(false, std::sync::atomic::Ordering::SeqCst).then(|| state.tabs.layout())
+        // a restored arrangement is handed to the list that introduces its sessions (`restore_tabs`)
+        None
     }));
 
     // `onExit`

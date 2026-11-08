@@ -4,7 +4,7 @@
 use mc_core::types::WorkflowRun;
 use mc_core::validate;
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
@@ -25,12 +25,12 @@ pub fn workflows_delete(state: State<'_, AppState>, id: String) -> CmdResult<()>
 }
 
 /// `workflows:run`: a run of a workflow in a folder that exists, with a task; `place` is where the
-/// window wants the tab of its first step.
+/// window wants the tab of its first step. The checks read files: off the window's thread.
 #[tauri::command]
-pub fn workflows_run(state: State<'_, AppState>, input: Option<Value>, place: Option<Value>) -> CmdResult<WorkflowRun> {
+pub async fn workflows_run(app: AppHandle, input: Option<Value>, place: Option<Value>) -> CmdResult<WorkflowRun> {
     let input = validate::start_run_input(&input.unwrap_or(Value::Null))?;
     let place = place.as_ref().and_then(validate::place);
-    Ok(run_workflow(&state, &input, place)?)
+    super::blocking(&app, move |state| Ok(run_workflow(state, &input, place)?)).await
 }
 
 /// `workflows:approve`: the run passes the gate it waits at.

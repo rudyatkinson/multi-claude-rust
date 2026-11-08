@@ -14,10 +14,18 @@ use crate::state::{lock, AppState};
 
 /// The past conversations of every account (Main's in `~/.claude`). Files that did not change
 /// since the last listing are not read again.
+///
+/// The files are read outside the lock of the index, so that opening a conversation of the last
+/// listing does not wait for the next one; one listing reads at a time, with what the one before
+/// it read, and its index takes the place of the old one at the end.
 pub fn list_conversations(state: &AppState) -> Vec<ConversationEntry> {
     let paths = state.profiles.paths();
     let profiles: Vec<(String, PathBuf)> = state.profiles.list().iter().map(|p| (p.id.clone(), paths.config_dir_of(p))).collect();
-    lock(&state.conversations).list(&profiles).to_vec()
+    let _one_at_a_time = lock(&state.conversation_scan);
+    let mut index = lock(&state.conversations).take_reading();
+    let entries = index.list(&profiles).to_vec();
+    *lock(&state.conversations) = index;
+    entries
 }
 
 /// Opens a conversation from the last listing in a new tab, with the account it belongs to. The

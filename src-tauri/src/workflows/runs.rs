@@ -33,6 +33,16 @@ pub struct StartedStep {
 /// opened then.
 pub type Cancelled = Arc<dyn Fn() -> bool + Send + Sync>;
 
+/// An effect of the reducer, with what it needs of the moment it was decided: a watchdog's token
+/// and deadline, and the run a notice tells about, are taken while the dispatch is made, so that
+/// a dispatch that comes in before the effect is carried out cannot change them.
+enum Task {
+    Start { index: usize },
+    End { session_id: String },
+    Watch { index: usize, session_id: String, token: u64, deadline: tokio::time::Instant },
+    Notify { run: WorkflowRun, notice: Notice, index: usize },
+}
+
 /// What the runs need of the rest of the app (`RunsDeps`).
 pub trait RunsDeps: Send + Sync + 'static {
     /// `Date.now()`.
@@ -288,18 +298,19 @@ impl WorkflowRuns {
     /// the next dispatch may go ahead: telling the user asks the window whether it is in front,
     /// which waits for the window's thread, and that thread may itself be waiting to dispatch.
     fn dispatch(&self, id: &str, event: RunEvent) {
-        let effects = self.apply(id, &event);
-        for effect in effects {
-            self.perform(id, effect);
+        let tasks = self.apply(id, &event);
+        for task in tasks {
+            self.perform(id, task);
         }
     }
 
     /// The part of a dispatch that is made one at a time: the reducer, the new run, the saved
-    /// outputs and the list for the window. Gives the effects to carry out.
-    fn apply(&self, id: &str, event: &RunEvent) -> Vec<Effect> {
+    /// outputs and the list for the window, and what the effects need of this moment (see
+    /// [`Task`]). Gives the effects to carry out.
+    fn apply(&self, id: &str, event: &RunEvent) -> Vec<Task> {
         let _one_at_a_time = lock(&self.shared.dispatching);
         let deps = self.deps();
-        let (after, saves, list, effects) = {
+        let (after, saves, list, tasks) = {
             let mut state = self.state();
             let Some(pos) = state.runs.iter().position(|r| r.id == id) else { return Vec::new() };
             let reduced = reduce(&state.runs[pos], event, deps.now());
@@ -325,7 +336,8 @@ impl WorkflowRuns {
             let after = (!saves.is_empty()).then(|| run.clone());
             state.runs[pos] = run;
             state.trim();
-            (after, saves, state.list(), effects)
+            let tasks: Vec<Task> = effects.into_iter().filter_map(|effect| Self::prepare(&mut state, id, effect)).collect();
+            (after, saves, state.list(), tasks)
         };
         if let Some(run) = &after {
             for (index, text) in &saves {
@@ -333,12 +345,29 @@ impl WorkflowRuns {
             }
         }
         deps.changed(list);
-        effects
+        tasks
     }
 
-    fn perform(&self, id: &str, effect: Effect) {
-        match effect {
-            Effect::Start { index } => {
+    /// What an effect needs of the moment it was decided, taken under the lock of the dispatch
+    /// that decided it. A notice about a run that is no longer listed is not given.
+    fn prepare(state: &mut Inner, id: &str, effect: Effect) -> Option<Task> {
+        Some(match effect {
+            Effect::Start { index } => Task::Start { index },
+            Effect::End { session_id } => Task::End { session_id },
+            Effect::Watch { index, session_id } => {
+                state.next_token += 1;
+                let token = state.next_token;
+                state.watchdogs.insert(id.to_owned(), token);
+                let deadline = tokio::time::Instant::now() + Duration::from_millis(SILENT_MS);
+                Task::Watch { index, session_id, token, deadline }
+            }
+            Effect::Notify { notice, index } => Task::Notify { run: state.get(id).map(view_of)?, notice, index },
+        })
+    }
+
+    fn perform(&self, id: &str, task: Task) {
+        match task {
+            Task::Start { index } => {
                 let runs = self.clone();
                 let id = id.to_owned();
                 // not from inside the event that asked for it: opening a session reports back at once
@@ -357,17 +386,9 @@ impl WorkflowRuns {
                     runs.dispatch(&id, event);
                 }));
             }
-            Effect::End { session_id } => self.deps().end_session(&session_id),
-            Effect::Watch { index, session_id } => {
-                let token = {
-                    let mut state = self.state();
-                    state.next_token += 1;
-                    let token = state.next_token;
-                    state.watchdogs.insert(id.to_owned(), token);
-                    token
-                };
-                // the deadline is taken now, not when the task first runs
-                let deadline = tokio::time::Instant::now() + Duration::from_millis(SILENT_MS);
+            Task::End { session_id } => self.deps().end_session(&session_id),
+            Task::Watch { index, session_id, token, deadline } => {
+                // the deadline was taken with the dispatch, not when the task first runs
                 let runs = self.clone();
                 let id = id.to_owned();
                 self.deps().spawn(Box::pin(async move {
@@ -385,12 +406,7 @@ impl WorkflowRuns {
                     }
                 }));
             }
-            Effect::Notify { notice, index } => {
-                let view = self.state().get(id).map(view_of);
-                if let Some(view) = view {
-                    self.deps().notify(&view, notice, index);
-                }
-            }
+            Task::Notify { run, notice, index } => self.deps().notify(&run, notice, index),
         }
     }
 
@@ -660,6 +676,27 @@ mod tests {
         assert_eq!(runs.list()[0].steps[0].needs_you, Some(true));
         runs.input("t1");
         assert_eq!(runs.list()[0].steps[0].needs_you, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stale_watch_does_not_overwrite_the_next_steps_watchdog() {
+        let (runs, f) = fake();
+        let run = runs.start(&three(), "C:\\App", "task", None).unwrap();
+        // the first step opens; what that dispatch decided is carried out only later
+        let stale = runs.apply(&run.id, &RunEvent::Started { index: 0, session_id: "t1".into(), conversation_id: Some("c1".into()) });
+        assert!(stale.iter().any(|task| matches!(task, Task::Watch { index: 0, .. })));
+        // meanwhile the run moves on to the second step, whose watchdog is set
+        answer(&runs, "t1", "the plan");
+        runs.approve(&run.id);
+        settle().await;
+        assert!(runs.watches("t2"));
+        for task in stale {
+            runs.perform(&run.id, task);
+        }
+        advance(SILENT_MS).await;
+        // the second step's watchdog is the one that fires
+        assert_eq!(notices(&f), ["gate:plan", "needsYou:build"]);
+        assert_eq!(runs.list()[0].steps[1].needs_you, Some(true));
     }
 
     #[tokio::test(start_paused = true)]

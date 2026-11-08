@@ -5,10 +5,14 @@
 //! CLAUDE.md. The text has plain line feeds; the line ends and the byte order mark of the file on
 //! disk come back when it is written.
 
+use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -134,11 +138,15 @@ pub fn read_text(path: &Path, max_bytes: usize) -> AppResult<TextRead> {
 /// The line ends and byte order mark stay as the file had them (LF without one when it could not
 /// be read). A file that is gone is never brought back. The limit is [`SKILL_LIMITS`]`.file_bytes`,
 /// as in the Electron version.
+///
+/// Two saves of one file are made one after the other, so that the second one compares with what
+/// the first one wrote.
 pub fn save_text(path: &Path, text: &str, base_hash: Option<&str>) -> AppResult<SaveOutcome<TextRead>> {
     let max = SKILL_LIMITS.file_bytes;
     if text.len() > max {
         return Err(AppError::invalid(TEXT_TOO_LARGE));
     }
+    let _one_at_a_time = lock_path(path);
     let bytes = read_existing(path)?;
     if base_hash.is_some_and(|base| content_hash(&bytes) != base) {
         return Ok(SaveOutcome::Conflict(open_bytes(&bytes, max)));
@@ -166,21 +174,45 @@ pub fn create_text(path: &Path, content: impl AsRef<[u8]>) -> AppResult<()> {
     Ok(())
 }
 
+/// How many locks the saves of [`save_text`] are spread over; two files rarely share one.
+const PATH_LOCKS: usize = 64;
+static SAVING: [Mutex<()>; PATH_LOCKS] = [const { Mutex::new(()) }; PATH_LOCKS];
+
+/// The lock of the saves of one file (letter case aside on Windows, where it does not tell files apart).
+fn lock_path(path: &Path) -> std::sync::MutexGuard<'static, ()> {
+    let mut hasher = DefaultHasher::new();
+    if cfg!(windows) {
+        path.to_string_lossy().to_lowercase().hash(&mut hasher);
+    } else {
+        path.hash(&mut hasher);
+    }
+    SAVING[(hasher.finish() % PATH_LOCKS as u64) as usize].lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// `<file>.tmp-<pid>-<n>`: a name of its own for every write, also for two writes of one file at
+/// the same time.
 fn tmp_path(path: &Path) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
     let mut name = OsString::from(path.as_os_str());
-    name.push(format!(".tmp-{}", std::process::id()));
+    name.push(format!(".tmp-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     PathBuf::from(name)
 }
 
 /// Writes a file so that a reader sees the old content or the new one, never half of it: into
-/// `<file>.tmp-<pid>`, then renamed over the file (tried again while Windows says it is busy).
+/// `<file>.tmp-<pid>-<n>`, then renamed over the file (tried again while Windows says it is busy).
 /// When something keeps the old file open so that it cannot be replaced, the bytes are written
-/// into it instead.
+/// into it instead. When that fails too, the temporary file stays, with the new content, and the
+/// error names it.
 pub fn write_file_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = tmp_path(path);
-    fs::write(&tmp, bytes)?;
+    if let Err(err) = fs::write(&tmp, bytes) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
     if retry_busy(|| fs::rename(&tmp, path), BUSY_TRIES, BUSY_WAIT).is_err() {
-        fs::write(path, bytes)?;
+        if let Err(err) = fs::write(path, bytes) {
+            return Err(io::Error::new(err.kind(), format!("{err}. The new content was kept in {}", tmp.display())));
+        }
         let _ = fs::remove_file(&tmp);
     }
     Ok(())
@@ -418,6 +450,43 @@ mod tests {
         fs::write(&file, "old").unwrap();
         write_file_atomic(&file, b"new").unwrap();
         assert_eq!(fs::read(&file).unwrap(), b"new");
-        assert!(!tmp_path(&file).exists());
+        // nothing but the file is left
+        assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
+        // every write has a temporary file of its own
+        assert_ne!(tmp_path(&file), tmp_path(&file));
+        assert!(tmp_path(&file).to_string_lossy().contains(&format!("a.md.tmp-{}-", std::process::id())));
+    }
+
+    #[test]
+    fn keeps_the_new_content_when_the_file_cannot_be_written_at_all() {
+        let tmp = tempfile::tempdir().unwrap();
+        // a folder where the file should be: neither renamed over nor written into
+        let file = tmp.path().join("a.md");
+        fs::create_dir(&file).unwrap();
+        let err = write_file_atomic(&file, b"new").unwrap_err().to_string();
+        let kept: Vec<PathBuf> = fs::read_dir(tmp.path()).unwrap().map(|e| e.unwrap().path()).filter(|p| *p != file).collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(fs::read(&kept[0]).unwrap(), b"new");
+        assert!(err.contains(&kept[0].display().to_string()), "{err}");
+    }
+
+    #[test]
+    fn two_saves_of_one_file_at_once_do_not_both_win() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("a.md");
+        fs::write(&file, "start\n").unwrap();
+        let base = read_text(&file, MAX).unwrap().hash;
+        let outcomes: Vec<bool> = std::thread::scope(|s| {
+            let saves: Vec<_> = (0..8)
+                .map(|i| {
+                    let (file, base) = (&file, &base);
+                    s.spawn(move || matches!(save_text(file, &format!("save {i}\n"), Some(base)).unwrap(), SaveOutcome::Saved(_)))
+                })
+                .collect();
+            saves.into_iter().map(|t| t.join().unwrap()).collect()
+        });
+        // all started from the same text: one is saved, the others see what it wrote
+        assert_eq!(outcomes.iter().filter(|saved| **saved).count(), 1);
+        assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 1);
     }
 }

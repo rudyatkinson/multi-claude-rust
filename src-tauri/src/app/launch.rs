@@ -96,12 +96,22 @@ pub fn prepare_settings(state: &AppState, profile: &Profile, session_id: &str, c
 /// `restart`: starts the session again in its tab, on the same conversation if asked. A session
 /// that ended before its first message left no conversation to resume by id: then the folder's
 /// last conversation is continued.
+///
+/// While it restarts the tab carries the moving mark (not announced: it is over in a moment), so
+/// that a move cannot begin in between.
 pub fn restart_session(state: &AppState, id: &str, continue_conversation: bool) -> AppResult<SessionInfo> {
     let info = state.sessions.get(id).ok_or_else(|| AppError::refused("Session not found"))?;
     // its process was ended on purpose; the move starts it again over there
-    if info.moving {
+    if !state.sessions.try_set_moving(id) {
         return Err(AppError::refused("This conversation is being moved to another account."));
     }
+    let restarted = restart_marked(state, id, info, continue_conversation);
+    // the new session has an id of its own: the old one is only still there when the restart failed
+    state.sessions.set_moving(id, false);
+    restarted
+}
+
+fn restart_marked(state: &AppState, id: &str, info: SessionInfo, continue_conversation: bool) -> AppResult<SessionInfo> {
     let mut request = state.sessions.request_of(id).ok_or_else(|| AppError::refused("Session not found"))?;
     let transcript = state.sessions.transcript_of(id);
     let written = state

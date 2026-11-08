@@ -55,6 +55,18 @@ pub(crate) fn open(program: &str, args: &[String], cwd: &str, env: &BTreeMap<Str
     }
 }
 
+/// The pty's own end as a session keeps it: it is resized, and closed by dropping it, which on
+/// Windows closes the pseudoconsole. Tests put one of their own in.
+pub(crate) trait Console: Send {
+    fn resize(&self, size: PtySize) -> Result<(), String>;
+}
+
+impl Console for Box<dyn MasterPty + Send> {
+    fn resize(&self, size: PtySize) -> Result<(), String> {
+        MasterPty::resize(&**self, size).map_err(|e| e.to_string())
+    }
+}
+
 pub(crate) fn thread(name: String, f: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
     std::thread::Builder::new().name(name).spawn(f).map(|_| ())
 }

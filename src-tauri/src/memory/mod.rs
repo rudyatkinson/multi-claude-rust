@@ -26,13 +26,15 @@ use mc_core::memory::{
     new_memory_text, one_line, parse_index, remove_index_line, same_name, search_words, stem_of, IndexFile, SNIPPET_AROUND,
 };
 use mc_core::skills::locale_compare;
-use mc_core::text_file::{busy_message, create_text, decode, encode, is_busy, read_text, retry_busy, save_text, write_file_atomic, TextRead, BUSY_TRIES, BUSY_WAIT};
+use mc_core::text_file::{create_text, decode, encode, read_text, save_text, write_file_atomic, TextRead};
 use mc_core::types::{
     AdoptResult, IndexLine, MemoryCreateInput, MemoryDetail, MemoryEntry, MemoryFolder, MemoryHit, MemoryListing, MemoryProject, MemoryRef,
     MemorySaveResult, MemoryView, Profile, SaveOutcome, SessionKind, MEMORY_INDEX, MEMORY_LIMITS, MEMORY_TYPES, SKILL_LIMITS,
 };
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
+
+use crate::library::trash::{system_trash_fn, trash_with};
 
 pub use folders::{find_memory_folders, folder_id, memory_files, FolderSpec, MemoryFile, ProjectFolders};
 pub use share::{adopt_memories, naming_problem, shared_memory_dir, Clock, MemorySharing, CHECK_MS};
@@ -99,12 +101,7 @@ impl MemoryInputs {
     }
 }
 
-/// Moves a file to the system's bin; fails when there is none for that drive.
-pub type TrashFn = Arc<dyn Fn(&Path) -> io::Result<()> + Send + Sync>;
-
-fn system_trash() -> TrashFn {
-    Arc::new(|file: &Path| trash::delete(file).map_err(|e| io::Error::other(e.to_string())))
-}
+pub use crate::library::trash::TrashFn;
 
 /// `sameKey`: two project names are one project, in any case on Windows.
 fn same_key(a: &str, b: &str) -> bool {
@@ -177,7 +174,7 @@ impl MemoryService {
     /// A service from its parts. Without an app handle nothing can be shown in the file manager
     /// (tests).
     pub fn with_parts(app: Option<AppHandle>, clock: Clock) -> Self {
-        MemoryService { app, project_folders: ProjectFolders::new(), sharing: MemorySharing::new(clock.clone()), clock, trash: RwLock::new(system_trash()) }
+        MemoryService { app, project_folders: ProjectFolders::new(), sharing: MemorySharing::new(clock.clone()), clock, trash: RwLock::new(system_trash_fn()) }
     }
 
     /// Replaces moving a deleted memory to the system's bin (tests).
@@ -383,13 +380,7 @@ impl MemoryService {
             return Err(AppError::refused("MEMORY.md is the index of this folder. Delete the memories it lists instead."));
         }
         let trash = self.trash.read().unwrap_or_else(PoisonError::into_inner).clone();
-        retry_busy(|| trash(&abs), BUSY_TRIES, BUSY_WAIT).map_err(|err| {
-            if is_busy(&err) {
-                busy_message(err, "Deleting")
-            } else {
-                AppError::io(format!("The memory could not be moved to the bin ({err}). It was not deleted."))
-            }
-        })?;
+        trash_with(&trash, &abs, "memory")?;
         if spec.files.iter().any(|f| is_index(f)) {
             rewrite(&spec.dir.join(MEMORY_INDEX), |text| remove_index_line(text, &r.file))?;
         }

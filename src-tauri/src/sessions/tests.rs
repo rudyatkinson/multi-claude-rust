@@ -319,6 +319,31 @@ fn turns_moves_and_arrivals_are_announced_when_they_change() {
 }
 
 #[test]
+fn only_one_caller_gets_to_mark_a_session_as_moving() {
+    let (rec, manager) = manager();
+    fake(&manager, "a", SessionKind::Claude, None);
+    assert!(manager.try_set_moving("a"));
+    assert!(!manager.try_set_moving("a"));
+    assert!(manager.get("a").unwrap().moving);
+    // the caller announces it when the window is to show it
+    assert!(rec.lists().is_empty());
+    manager.set_moving("a", false);
+    assert!(manager.try_set_moving("a"));
+    assert!(!manager.try_set_moving("nope"));
+}
+
+#[test]
+fn a_replacement_for_a_tab_that_is_gone_is_cleaned_up() {
+    let (_rec, manager) = manager();
+    let cleanups = record_cleanups(&manager);
+    let dir = temp_folder();
+    let plan = manager.plan(&request(&dir.path().to_string_lossy(), SessionKind::Login), "/bin/claude", None, BTreeMap::new(), |_, _| Ok(None)).unwrap();
+    let id = plan.id.clone();
+    assert_eq!(manager.replace("gone", plan).unwrap_err().to_string(), "Session not found");
+    assert_eq!(*lock(&cleanups), vec![("work".to_owned(), id)]);
+}
+
+#[test]
 fn the_status_line_fills_in_what_it_knows() {
     let (rec, manager) = manager();
     fake(&manager, "a", SessionKind::Claude, None);
@@ -402,6 +427,119 @@ fn sessions_without_a_process_take_no_input_and_end_at_once() {
     rt.block_on(manager.end("a", 5_000));
     rt.block_on(manager.end("nope", 5_000));
     assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+/// What happened to a session's pty, in order: `close` (its console) and `kill` (its process).
+type PtyLog = Arc<Mutex<Vec<&'static str>>>;
+
+#[derive(Debug)]
+struct FakeKiller(PtyLog);
+
+impl ChildKiller for FakeKiller {
+    fn kill(&mut self) -> std::io::Result<()> {
+        lock(&self.0).push("kill");
+        Ok(())
+    }
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(FakeKiller(self.0.clone()))
+    }
+}
+
+struct FakeConsole(PtyLog);
+
+impl Console for FakeConsole {
+    fn resize(&self, _size: PtySize) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+impl Drop for FakeConsole {
+    fn drop(&mut self) {
+        lock(&self.0).push("close");
+    }
+}
+
+/// A running session with a pty that only records what is done to it, and the switch that says
+/// its process is gone.
+fn fake_running(manager: &SessionManager, id: &str) -> (PtyLog, watch::Sender<bool>) {
+    fake(manager, id, SessionKind::Claude, None);
+    let log = PtyLog::default();
+    let (input, _queue) = mpsc::channel();
+    let (exited_tx, exited) = watch::channel(false);
+    let mut t = manager.table();
+    let live = t.live.get_mut(id).unwrap();
+    live.pty = Some(Pty { master: Some(Box::new(FakeConsole(log.clone()))), input, killer: Box::new(FakeKiller(log.clone())) });
+    live.exited = exited;
+    (log, exited_tx)
+}
+
+/// The pty's log once it has `len` entries (the console is closed on a thread of its own).
+fn log_of(log: &PtyLog, len: usize) -> Vec<&'static str> {
+    let started = std::time::Instant::now();
+    while lock(log).len() < len && started.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    lock(log).clone()
+}
+
+async fn settle() {
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test(start_paused = true)]
+async fn ending_closes_the_console_and_kills_only_a_process_that_stays() {
+    let (_rec, manager) = manager();
+    // a process that ends once its console is closed is never killed
+    let (log, exited) = fake_running(&manager, "a");
+    let ending = tokio::spawn(manager.end("a", 5_000));
+    // its timers start when it first runs
+    settle().await;
+    assert_eq!(log_of(&log, 1), ["close"]);
+    tokio::time::advance(Duration::from_millis(1_000)).await;
+    settle().await;
+    assert_eq!(*lock(&log), ["close"]);
+    exited.send_replace(true);
+    ending.await.unwrap();
+    assert_eq!(*lock(&log), ["close"]);
+
+    // one that stays is killed after the grace
+    let (log, exited) = fake_running(&manager, "b");
+    let ending = tokio::spawn(manager.end("b", 5_000));
+    settle().await;
+    assert_eq!(log_of(&log, 1), ["close"]);
+    tokio::time::advance(END_GRACE - Duration::from_millis(1)).await;
+    settle().await;
+    assert_eq!(*lock(&log), ["close"]);
+    tokio::time::advance(Duration::from_millis(1)).await;
+    settle().await;
+    assert_eq!(*lock(&log), ["close", "kill"]);
+    exited.send_replace(true);
+    ending.await.unwrap();
+
+    // a timeout shorter than the grace kills at the timeout, and the end is not waited for after it
+    let (log, _exited) = fake_running(&manager, "c");
+    let ending = tokio::spawn(manager.end("c", 500));
+    settle().await;
+    assert_eq!(log_of(&log, 1), ["close"]);
+    tokio::time::advance(Duration::from_millis(500)).await;
+    settle().await;
+    assert_eq!(*lock(&log), ["close", "kill"]);
+    assert!(ending.is_finished());
+}
+
+#[test]
+fn closing_a_tab_kills_its_process_at_once() {
+    let (_rec, manager) = manager();
+    let (log, _exited) = fake_running(&manager, "a");
+    manager.close("a");
+    let expected: &[&str] = if cfg!(windows) { &["kill", "close"] } else { &["kill"] };
+    assert_eq!(log_of(&log, expected.len()), expected);
+    let (log, _exited) = fake_running(&manager, "b");
+    manager.kill_all();
+    assert_eq!(log_of(&log, expected.len()), expected);
 }
 
 #[test]

@@ -33,15 +33,19 @@ use mc_core::types::{
     SessionStatus, SessionsChanged, Turn,
 };
 use mc_core::validate::{PTY_MAX, PTY_MIN};
-use portable_pty::{Child, ChildKiller, MasterPty, PtySize};
+use portable_pty::{Child, ChildKiller, PtySize};
 use tauri::AppHandle;
 use tokio::sync::watch;
 
 use crate::claude_binary::{is_shim, spawn_spec};
+use pty::Console;
 use stream::Stream;
 
 /// How long an ended program gets to hand over the rest of its output.
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(1000);
+/// Windows: how long [`SessionManager::end`] lets a program end by itself once its console is
+/// closed, before it is killed.
+const END_GRACE: Duration = Duration::from_millis(1500);
 
 /// Where a session manager sends its events. The app sends them to the window
 /// ([`SessionManager::new`]); tests record them.
@@ -139,8 +143,8 @@ struct Handlers {
 
 /// The pty of a running session.
 struct Pty {
-    /// Taken when the pty is closed early (a kill on Windows).
-    master: Option<Box<dyn MasterPty + Send>>,
+    /// Taken when the pty is closed early (an end or a kill on Windows).
+    master: Option<Box<dyn Console>>,
     input: pty::Input,
     killer: Box<dyn ChildKiller + Send + Sync>,
 }
@@ -164,7 +168,7 @@ struct Live {
 impl Live {
     /// Tells the process to end, once. On Windows the pseudoconsole is closed as well, which ends
     /// whatever else runs in it (node-pty did both); the caller closes the returned console.
-    fn kill(&mut self) -> Option<Box<dyn MasterPty + Send>> {
+    fn kill(&mut self) -> Option<Box<dyn Console>> {
         if self.ending {
             return None;
         }
@@ -179,6 +183,20 @@ impl Live {
         } else {
             None
         }
+    }
+
+    /// The first step of [`SessionManager::end`]. On Windows only the pseudoconsole is closed
+    /// (the caller closes the returned console): the programs in it are asked to close, as when a
+    /// console window is closed (`CTRL_CLOSE_EVENT`), and claude writes the end of its
+    /// conversation before it goes. Elsewhere the process is told to end at once.
+    fn end_gently(&mut self) -> Option<Box<dyn Console>> {
+        if !cfg!(windows) {
+            return self.kill();
+        }
+        if self.ending {
+            return None;
+        }
+        self.pty.as_mut()?.master.take()
     }
 }
 
@@ -269,11 +287,24 @@ pub fn title_of(cwd: &str) -> String {
 }
 
 /// Closes a pty on a thread of its own: closing a Windows pseudoconsole can take a moment.
-fn close_later(master: Option<Box<dyn MasterPty + Send>>) {
+fn close_later(master: Option<Box<dyn Console>>) {
     if let Some(master) = master {
         // if no thread can be started, the console is closed here
         let _ = pty::thread("pty-close".into(), move || drop(master));
     }
+}
+
+/// Waits at most `limit` for a session's process to be gone; true when it is.
+async fn exited_within(exited: &mut watch::Receiver<bool>, limit: Duration) -> bool {
+    let gone = async {
+        while !*exited.borrow_and_update() {
+            // the waiter is gone with its thread
+            if exited.changed().await.is_err() {
+                break;
+            }
+        }
+    };
+    tokio::time::timeout(limit, gone).await.is_ok()
 }
 
 impl SessionManager {
@@ -427,6 +458,8 @@ impl SessionManager {
     /// which the new session names the one it replaces.
     pub fn replace(&self, old_id: &str, mut plan: SpawnPlan) -> AppResult<SessionInfo> {
         if !self.table().live.contains_key(old_id) {
+            // the plan's settings file and hook address were made for a session that never starts
+            self.cleanup(&plan.profile_id, &plan.id);
             return Err(AppError::refused("Session not found"));
         }
         plan.replaces = Some(old_id.to_owned());
@@ -482,7 +515,7 @@ impl SessionManager {
             info: info.clone(),
             request,
             transcript_path: None,
-            pty: Some(Pty { master: Some(master), input, killer }),
+            pty: Some(Pty { master: Some(Box::new(master)), input, killer }),
             ending: false,
             stream: stream.clone(),
             exited: exited_rx,
@@ -546,7 +579,7 @@ impl SessionManager {
     }
 
     /// The pty of the session `id`, if it is still the one of `stream` and not closed yet.
-    fn take_master(&self, id: &str, stream: &Arc<Stream>) -> Option<Box<dyn MasterPty + Send>> {
+    fn take_master(&self, id: &str, stream: &Arc<Stream>) -> Option<Box<dyn Console>> {
         let mut t = self.table();
         let live = t.live.get_mut(id).filter(|l| Arc::ptr_eq(&l.stream, stream))?;
         live.pty.as_mut()?.master.take()
@@ -625,31 +658,42 @@ impl SessionManager {
 
     /// Ends a session's process and resolves once it is gone, or after `timeout_ms` at the
     /// latest. The tab stays, as an ended session.
+    ///
+    /// On Windows the console is closed first, so that the program can finish what it was
+    /// writing (see `Live::end_gently`); one that is still there after [`END_GRACE`], or at
+    /// `timeout_ms` when that comes sooner, is killed. The process is only killed while the
+    /// returned future is awaited. Closing a tab and quitting kill at once instead.
     pub fn end(&self, id: &str, timeout_ms: u64) -> impl Future<Output = ()> + Send + 'static {
         let waiting = {
             let mut t = self.table();
             match t.live.get_mut(id) {
                 Some(live) if live.pty.is_some() => {
                     let exited = live.exited.clone();
-                    Some((exited, live.kill()))
+                    Some((exited, live.end_gently()))
                 }
                 _ => None,
             }
         };
-        let exited = waiting.map(|(exited, master)| {
-            close_later(master);
+        let exited = waiting.map(|(exited, console)| {
+            close_later(console);
             exited
         });
+        let manager = self.clone();
+        let id = id.to_owned();
         async move {
             let Some(mut exited) = exited else { return };
-            let gone = async move {
-                while !*exited.borrow_and_update() {
-                    if exited.changed().await.is_err() {
-                        break;
-                    }
-                }
-            };
-            let _ = tokio::time::timeout(Duration::from_millis(timeout_ms), gone).await;
+            let timeout = Duration::from_millis(timeout_ms);
+            if !cfg!(windows) {
+                exited_within(&mut exited, timeout).await;
+                return;
+            }
+            let grace = timeout.min(END_GRACE);
+            if exited_within(&mut exited, grace).await {
+                return;
+            }
+            // it did not end by itself
+            manager.kill(&id);
+            exited_within(&mut exited, timeout - grace).await;
         }
     }
 
@@ -770,6 +814,21 @@ impl SessionManager {
         };
         if changed {
             self.emit_changed(None);
+        }
+    }
+
+    /// Marks a session as on its way to another account unless it already is; true when this
+    /// call set the mark. Checked and set in one step, so that two moves, or a move and a restart,
+    /// cannot both go ahead. Nothing is announced: the caller does that when the window is to
+    /// show the mark ([`Self::announce`]); [`Self::set_moving`] takes it off again.
+    pub fn try_set_moving(&self, id: &str) -> bool {
+        let mut t = self.table();
+        match t.live.get_mut(id) {
+            Some(live) if !live.info.moving => {
+                live.info.moving = true;
+                true
+            }
+            _ => false,
         }
     }
 

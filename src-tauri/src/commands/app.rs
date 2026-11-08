@@ -68,10 +68,14 @@ pub async fn app_get_state(state: State<'_, AppState>) -> CmdResult<WindowState>
 }
 
 /// `app:ready`: the renderer has its listeners in place and can take queued "open folder" requests.
+/// The tabs of the last run may start now, which starts their processes: off the window's thread.
 #[tauri::command]
-pub fn app_ready(state: State<'_, AppState>) -> CmdResult<()> {
-    crate::app::boot::renderer_ready(&state);
-    Ok(())
+pub async fn app_ready(app: AppHandle) -> CmdResult<()> {
+    super::blocking(&app, |state| {
+        crate::app::boot::renderer_ready(state);
+        Ok(())
+    })
+    .await
 }
 
 /// `settings:update`: only the keys the window may change (`validate::settings_patch`). A new
@@ -87,7 +91,7 @@ pub async fn settings_update(state: State<'_, AppState>, patch: Option<Value>) -
         crate::tray::apply_setting(&state.app);
     }
     if patch.open_at_login.is_some() {
-        crate::app::boot::apply_login_item(&state);
+        crate::app::login_item::apply(&state, true);
     }
     if path_changed {
         locate_claude(&state).await;
