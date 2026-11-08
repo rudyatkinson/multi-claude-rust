@@ -2,27 +2,25 @@
 //! `src/main/explorerMenu/index.ts`). Windows only; elsewhere it is not supported.
 //!
 //! There are two tiers. The classic one ([`classic`]) is a registry verb, which Windows 11 shows
-//! under "Show more options". The package one puts the entry into the Windows 11 menu itself and
-//! needs a sparse package with a COM command; that comes with Phase 4 (TODO(Phase 4): the package
-//! files, `Add-AppxPackage` through PowerShell, its status and its removal). Until then the
-//! package tier is never chosen: this build has no package files.
+//! under "Show more options". The package one ([`package`]) puts the entry into the Windows 11
+//! menu itself: a sparse package with a COM command, registered through Windows PowerShell
+//! ([`powershell`]). Registering one tier removes the other, so there is one entry.
 
 pub mod classic;
+pub mod package;
+pub mod powershell;
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use mc_core::error::AppResult;
+use mc_core::error::{AppError, AppResult};
 use mc_core::types::{ExplorerMenuStatus, ExplorerMenuTier};
 
-use classic::{install_classic, is_classic_installed, reg_dword, reg_key_exists, remove_classic, ClassicVerb};
+use classic::{install_classic, is_classic_installed, remove_classic, ClassicVerb};
 
 pub const MENU_TITLE: &str = "Open in Multi Claude";
 
 const WINDOWS_11_BUILD: u32 = 22000;
-const DEV_MODE_KEY: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock";
-/// Present when the user switched Windows 11 back to the classic context menu.
-const CLASSIC_MENU_KEY: &str = r"HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32";
 
 /// What decides the tier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +62,7 @@ pub struct ExplorerMenuOptions {
     pub exe_path: String,
     /// Arguments that must precede the folder switch.
     pub app_args: Vec<String>,
-    /// Folder holding `AppxManifest.xml` and the command DLL; None in this build (Phase 4).
+    /// Folder holding `AppxManifest.xml` and the command DLL.
     pub package_dir: Option<PathBuf>,
 }
 
@@ -80,10 +78,12 @@ impl ExplorerMenu {
         ExplorerMenu { o, queue: tokio::sync::Mutex::new(()), last_error: Mutex::new(None) }
     }
 
-    /// The menu of this build: the running executable, packaged or not.
+    /// The menu of this build: the running executable, packaged or not, and its package files.
     pub fn for_this_build(os_build: Option<u32>) -> Self {
         let exe_path = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        ExplorerMenu::new(ExplorerMenuOptions { packaged: !tauri::is_dev(), os_build, exe_path, app_args: Vec::new(), package_dir: None })
+        let dev = tauri::is_dev();
+        let package_dir = package::package_dir(dev, package::resource_dir_of_this_build().as_deref());
+        ExplorerMenu::new(ExplorerMenuOptions { packaged: !dev, os_build, exe_path, app_args: Vec::new(), package_dir })
     }
 
     fn supported(&self) -> bool {
@@ -100,21 +100,35 @@ impl ExplorerMenu {
         ClassicVerb { key: key.into(), title, exe: self.o.exe_path.clone(), prefix_args: self.o.app_args.clone() }
     }
 
+    /// Two registry reads and a file check: quick enough to do inline.
     async fn tier_choice(&self) -> (ExplorerMenuTier, Option<String>) {
-        let (developer_mode, classic_menu_forced) =
-            tokio::join!(reg_dword(DEV_MODE_KEY, "AllowDevelopmentWithoutDevLicense"), reg_key_exists(CLASSIC_MENU_KEY));
         choose_tier(&TierInputs {
             packaged: self.o.packaged,
             os_build: self.o.os_build,
-            developer_mode: developer_mode == Some(1),
-            classic_menu_forced,
-            package_files_present: self.o.package_dir.as_ref().is_some_and(|dir| dir.join("AppxManifest.xml").exists()),
+            developer_mode: package::developer_mode(),
+            classic_menu_forced: package::classic_menu_forced(),
+            package_files_present: package::files_present(self.o.package_dir.as_deref()),
         })
     }
 
-    /// TODO(Phase 4): whether the sparse package is registered and its status is `Ok`.
+    /// Whether the sparse package is registered and Windows can use it. A development run never
+    /// registers it, so it does not ask.
     async fn package_registered(&self) -> bool {
-        false
+        if !self.o.packaged {
+            return false;
+        }
+        match package::status().await {
+            Ok(info) => info.is_some_and(|info| info.is_ok()),
+            Err(e) => {
+                log::warn!("explorer menu: could not read the package status: {e}");
+                false
+            }
+        }
+    }
+
+    /// A package can only have been registered by a packaged build on Windows 11.
+    fn may_have_package(&self) -> bool {
+        self.o.packaged && self.o.os_build.unwrap_or(0) >= WINDOWS_11_BUILD
     }
 
     async fn read_status(&self) -> ExplorerMenuStatus {
@@ -139,16 +153,31 @@ impl ExplorerMenu {
     }
 
     /// Registers the best tier this machine allows and removes the other, so there is one entry.
+    /// A package that cannot be registered leaves its error in `detail` and the classic verb in
+    /// its place.
     async fn register(&self) -> AppResult<()> {
         *self.last_error() = None;
         let (tier, _) = self.tier_choice().await;
-        if tier == ExplorerMenuTier::Package {
-            // TODO(Phase 4): register the package (`ENSURE_SCRIPT`), remove the classic verb and
-            // return; on failure keep the error in `last_error` and fall back to the classic verb.
-            // Not reached in this build: it has no package files.
-            log::warn!("explorer menu: the package tier is not in this build; using the classic verb");
+        if let (ExplorerMenuTier::Package, Some(dir)) = (tier, &self.o.package_dir) {
+            match package::ensure(dir).await {
+                Ok(()) => {
+                    remove_classic(&self.verb().key).await;
+                    return Ok(());
+                }
+                Err(e) => {
+                    log::warn!("explorer menu: could not register the package: {e} (hresult {:?})", e.hresult);
+                    *self.last_error() = Some(package::registration_error(&e));
+                }
+            }
         }
-        install_classic(&self.verb()).await
+        install_classic(&self.verb()).await?;
+        // e.g. Developer Mode was turned off after the package was registered
+        if self.may_have_package() {
+            if let Err(e) = package::remove().await {
+                log::warn!("explorer menu: could not remove the package: {e}");
+            }
+        }
+        Ok(())
     }
 
     pub async fn enable(&self) -> AppResult<ExplorerMenuStatus> {
@@ -164,7 +193,9 @@ impl ExplorerMenu {
         if self.supported() {
             *self.last_error() = None;
             remove_classic(&self.verb().key).await;
-            // TODO(Phase 4): a packaged app also removes its package (`REMOVE_SCRIPT`).
+            if self.o.packaged {
+                package::remove().await.map_err(|e| AppError::io(package::removal_error(&e)))?;
+            }
         }
         Ok(self.read_status().await)
     }
@@ -216,5 +247,26 @@ mod tests {
         };
         assert_eq!((menu(true).verb().key, menu(true).verb().title), ("MultiClaude".to_owned(), "Open in Multi Claude".to_owned()));
         assert_eq!((menu(false).verb().key, menu(false).verb().title), ("MultiClaudeDev".to_owned(), "Open in Multi Claude (Dev)".to_owned()));
+    }
+
+    /// Reads this machine's entry the way a packaged build does (`Get-AppxPackage`, registry
+    /// reads) and changes nothing. Run with
+    /// `cargo test -p multi-claude reads_the_entry_of_this_machine -- --ignored --nocapture`.
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore = "asks Windows PowerShell about this machine's packages"]
+    async fn reads_the_entry_of_this_machine() {
+        println!("package: {:?}", package::status().await);
+        let menu = ExplorerMenu::new(ExplorerMenuOptions {
+            packaged: true,
+            os_build: Some(WINDOWS_11_BUILD),
+            exe_path: r"C:\mc.exe".into(),
+            app_args: vec![],
+            package_dir: package::package_dir(true, None),
+        });
+        let status = menu.status().await;
+        println!("status: {status:?}");
+        assert!(status.supported);
+        assert_eq!(status.detail, None);
     }
 }

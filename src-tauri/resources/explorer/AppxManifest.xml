@@ -2,8 +2,8 @@
 <!--
   Sparse package that only exists to put "Open in Multi Claude" into the Windows 11 File Explorer
   context menu. It is registered unsigned from this folder (Developer Mode) by the app's settings.
-  Bump Version whenever this file or the DLL changes. The Clsid must match the DLL source and
-  src/main/explorerMenu.
+  Bump Version whenever this file or the DLL changes. The Clsid must match the DLL source
+  (crates/mc-explorer-command) and src-tauri/src/explorer_menu/package.rs; a test there checks it.
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -15,7 +15,7 @@
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   IgnorableNamespaces="uap uap10 rescap desktop4 desktop5 desktop6 com">
-  <Identity Name="MultiClaude.ExplorerMenu" Publisher="CN=MultiClaude" Version="1.0.0.0" ProcessorArchitecture="neutral" />
+  <Identity Name="MultiClaude.ExplorerMenu" Publisher="CN=MultiClaude" Version="1.1.0.0" ProcessorArchitecture="neutral" />
   <Properties>
     <DisplayName>Multi Claude</DisplayName>
     <PublisherDisplayName>Multi Claude</PublisherDisplayName>

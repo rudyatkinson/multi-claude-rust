@@ -2576,6 +2576,7 @@ dependencies = [
 name = "mc-explorer-command"
 version = "0.6.0"
 dependencies = [
+ "tempfile",
  "windows",
  "windows-core",
 ]

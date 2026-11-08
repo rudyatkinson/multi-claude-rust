@@ -9,16 +9,23 @@ publish.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
-# the built DLL ships as resources/explorer/mc_explorer_command_x64.dll (Phase 4)
+# built by scripts/build-explorer-dll.ps1 (`npm run build:shell`), which copies the DLL to
+# src-tauri/resources/explorer/mc_explorer_command_x64.dll
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
   "Win32_Foundation",
+  "Win32_Security",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
+  "Win32_System_SystemServices",
   "Win32_System_Threading",
   "Win32_UI_Shell",
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.62"
+
+[target.'cfg(windows)'.dev-dependencies]
+tempfile.workspace = true

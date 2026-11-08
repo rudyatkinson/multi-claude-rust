@@ -109,28 +109,6 @@ pub async fn is_classic_installed(key: &str) -> bool {
     a.ok && b.ok
 }
 
-pub async fn reg_key_exists(key: &str) -> bool {
-    reg(&strings(&["query", key])).await.ok
-}
-
-/// The number in `reg query`'s line for a DWORD value.
-fn parse_dword(stdout: &str) -> Option<u32> {
-    let at = stdout.find("REG_DWORD")?;
-    let rest = stdout[at + "REG_DWORD".len()..].trim_start();
-    let hex = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X"))?;
-    let digits: String = hex.chars().take_while(char::is_ascii_hexdigit).collect();
-    u32::from_str_radix(&digits, 16).ok()
-}
-
-/// Reads a DWORD value; None when the key or value is missing.
-pub async fn reg_dword(key: &str, value: &str) -> Option<u32> {
-    let result = reg(&strings(&["query", key, "/v", value])).await;
-    if !result.ok {
-        return None;
-    }
-    parse_dword(&result.stdout)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,13 +149,5 @@ mod tests {
         assert_eq!(commands[0], ["add", keys[0].as_str(), "/ve", "/d", "Open in Multi Claude", "/f"]);
         assert_eq!(commands[1], ["add", keys[0].as_str(), "/v", "Icon", "/d", verb.exe.as_str(), "/f"]);
         assert_eq!(commands[2], ["add", format!(r"{}\command", keys[0]).as_str(), "/ve", "/d", classic_command(&verb).as_str(), "/f"]);
-    }
-
-    #[test]
-    fn reads_a_dword_from_what_reg_query_prints() {
-        let out = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock\r\n    AllowDevelopmentWithoutDevLicense    REG_DWORD    0x1\r\n\r\n";
-        assert_eq!(parse_dword(out), Some(1));
-        assert_eq!(parse_dword("    X    REG_DWORD    0x0000001a\r\n"), Some(26));
-        assert_eq!(parse_dword("    X    REG_SZ    hello\r\n"), None);
     }
 }

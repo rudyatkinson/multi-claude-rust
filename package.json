@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "rust:test": "cargo test --workspace",
-    "dist": "tauri build"
+    "dist": "tauri build",
+    "build:shell": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-explorer-dll.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.0",
