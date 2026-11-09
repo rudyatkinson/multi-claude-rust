@@ -10,6 +10,7 @@ import {
   emptyLayout,
   findGroup,
   flatten,
+  focusGroup,
   focusStep,
   groupOf,
   isPanel,
@@ -33,6 +34,7 @@ import {
 } from '@shared/layout'
 import { chooseOpenTarget } from '@shared/openTarget'
 import { matchShortcut, type ShortcutAction } from '@shared/shortcuts'
+import { DEFAULT_SPLIT, parseSplit, serializeSplit, type AccountsSplit } from '@shared/sidebarSplit'
 import { isAsleep, sleepToggle } from '@shared/sleep'
 import { parseTerminalTitle, type TabStatus } from '@shared/terminalTitle'
 import { callsForYou, turnKey } from '@shared/turn'
@@ -44,6 +46,7 @@ import { freeStepName, type Workflow, type WorkflowRun, type WorkflowStep } from
 import { errorMessage, getAppVersion, listening, mc } from './api'
 import type { LibrarySection } from './library'
 import { tabLabel } from './format'
+import type { DropMark, DropPreview } from './tabDrag'
 import { clearSearch, disposeMissing, focusTerminal, handlePtyData, setFontSize } from './terminal/terminalRegistry'
 
 export type Modal =
@@ -99,6 +102,10 @@ interface UiState extends Omit<AppState, 'layout'> {
   newSession: { groupId: string } | null
   /** The tab that is being dragged. */
   tabDrag: string | null
+  /** What a tab, or files from outside, dragged to where the pointer is would do, lit up in the workspace. */
+  dropPreview: DropPreview | null
+  /** Where among the tabs that drop would go: marked in an area's strip or in the sidebar's list. */
+  dropMark: DropMark | null
   /** The version of this app; null until the backend said it. */
   appVersion: string | null
   /** Topic and activity of each session, read from its terminal title. */
@@ -120,6 +127,10 @@ interface UiState extends Omit<AppState, 'layout'> {
   /** The workflow shown in the designer. */
   workflowId: string | null
   sidebarCollapsed: boolean
+  /** With the tabs in the sidebar: the height of the account cards above them, or a single card. */
+  accountsSplit: AccountsSplit
+  /** The account the single card shows instead of the active tab's, until another tab comes to the front. */
+  peekAccount: string | null
   modal: Modal
   toasts: Toast[]
   confirm: (ConfirmRequest & { resolve(ok: boolean): void }) | null
@@ -145,6 +156,7 @@ const EMPTY: Omit<AppState, 'layout'> = {
 }
 
 const SIDEBAR_KEY = 'mc.sidebarCollapsed'
+const ACCOUNTS_KEY = 'mc.sidebarAccounts'
 
 // A layout preference of this window only. Storage can be unavailable; the sidebar then starts open.
 function readSidebarCollapsed(): boolean {
@@ -155,6 +167,15 @@ function readSidebarCollapsed(): boolean {
   }
 }
 
+// The same for the room the accounts take above the tabs in the sidebar.
+function readAccountsSplit(): AccountsSplit {
+  try {
+    return parseSplit(localStorage.getItem(ACCOUNTS_KEY))
+  } catch {
+    return DEFAULT_SPLIT
+  }
+}
+
 export const useStore = create<UiState>(() => ({
   ...EMPTY,
   ready: false,
@@ -162,6 +183,8 @@ export const useStore = create<UiState>(() => ({
   activeId: null,
   newSession: null,
   tabDrag: null,
+  dropPreview: null,
+  dropMark: null,
   appVersion: null,
   tabStatus: {},
   attention: {},
@@ -173,6 +196,8 @@ export const useStore = create<UiState>(() => ({
   librarySection: 'skills',
   workflowId: null,
   sidebarCollapsed: readSidebarCollapsed(),
+  accountsSplit: readAccountsSplit(),
+  peekAccount: null,
   modal: null,
   toasts: [],
   confirm: null,
@@ -276,7 +301,9 @@ function reportVisible(): void {
 /** Makes a new arrangement the current one and tells the main process, which saves it. */
 function setLayout(next: Layout): void {
   if (next === get().layout) return
-  set({ layout: next, activeId: activeIdOf(next) })
+  const activeId = activeIdOf(next)
+  // a look at another account's card lasts until another tab comes to the front
+  set({ layout: next, activeId, ...(activeId !== get().activeId && { peekAccount: null }) })
   mc.send('ui:layout', next)
   reportVisible()
   markSeen()
@@ -322,6 +349,12 @@ export function mergeAreas(): void {
   refocus()
 }
 
+/** Gives the keyboard to an area, to the tab it shows. */
+export function focusArea(groupId: string): void {
+  setLayout(focusGroup(get().layout, groupId))
+  refocus()
+}
+
 export function setSplitRatio(splitId: string, ratio: number): void {
   setLayout(setRatio(get().layout, splitId, ratio))
 }
@@ -336,15 +369,41 @@ export function toggleSidebar(): void {
   }
 }
 
+/** With the tabs in the sidebar: how tall the accounts above them are, or that they fold to one card. */
+export function setAccountsSplit(split: AccountsSplit): void {
+  set({ accountsSplit: split })
+  try {
+    localStorage.setItem(ACCOUNTS_KEY, serializeSplit(split))
+  } catch {
+    // not remembered across restarts then
+  }
+}
+
+/** Shows another account in the single card, until another tab comes to the front; null goes back to the active tab's. */
+export function setPeekAccount(profileId: string | null): void {
+  if (get().peekAccount !== profileId) set({ peekAccount: profileId })
+}
+
 // ---------- dragging a tab ----------
 
-/** A tab is being dragged with the pointer (see `Workspace`). A tab that closes meanwhile ends it. */
+/** A tab is being dragged with the pointer (see `tabDrag.ts`). A tab that closes meanwhile ends it. */
 export function startTabDrag(id: string): void {
   set({ tabDrag: id })
 }
 
 export function endTabDrag(): void {
   if (get().tabDrag) set({ tabDrag: null })
+}
+
+const sameJson = (a: unknown, b: unknown): boolean => a === b || JSON.stringify(a) === JSON.stringify(b)
+
+/** Shows what a drag would do where the pointer is; nulls for nothing. The same feedback again changes nothing. */
+export function showDrop(preview: DropPreview | null, mark: DropMark | null): void {
+  const s = get()
+  const samePreview = sameJson(s.dropPreview, preview)
+  const sameMark = sameJson(s.dropMark, mark)
+  if (samePreview && sameMark) return
+  set({ ...(!samePreview && { dropPreview: preview }), ...(!sameMark && { dropMark: mark }) })
 }
 
 // ---------- tab status ----------

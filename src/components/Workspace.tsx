@@ -1,5 +1,5 @@
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import {
   bodyRect,
   canDrop,
@@ -18,51 +18,46 @@ import {
   type HitOptions,
   type Metrics,
   type PanelKind,
-  type Rect,
-  type StripSide
+  type Rect
 } from '@shared/layout'
 import { pathsAsInput } from '@shared/paths'
 import { sleepLabel } from '@shared/sleep'
-import { dropTarget, type DropTarget } from '@shared/tabOrder'
+import { dropTarget } from '@shared/tabOrder'
 import { tabStripOf, type SessionInfo } from '@shared/types'
 import { errorMessage } from '../api'
-import { followDrag } from '../pointerDrag'
 import {
   closeSession,
-  endTabDrag,
   moveTabTo,
   openDropped,
   openNewSession,
-  refocus,
   restartSession,
   setActive,
   setSplitRatio,
   setTabTitle,
+  showDrop,
   splitTab,
   splitTabRoot,
-  startTabDrag,
   useStore,
   wakeSession
 } from '../store'
+import { registerWorkspaceDrop, scrollAtEdge, type DropMark, type DropPreview, type TabDrop } from '../tabDrag'
 import { fitTerminal, focusTerminal, mountTerminal, pasteText, setTerminalAsleep, setTerminalVisible } from '../terminal/terminalRegistry'
-import { GroupTabs, type StripMark } from './GroupTabs'
+import { GroupTabs } from './GroupTabs'
 import { LibraryPanel } from './LibraryPanel'
 import { ArrivedBar, LimitBar } from './LimitBar'
 import { SearchBar } from './SearchBar'
 import { WorkflowsPanel } from './WorkflowsPanel'
 
 /**
- * The size of an area's tab strip: the height of the row on top, the width of the column on the
- * left. `--strip` in the stylesheet follows it (set on the workspace).
+ * The height of an area's tab strip, a row on top of it; `--strip` in the stylesheet follows it
+ * (set on the workspace). With the tabs in the sidebar the areas have none: the geometry then
+ * has no strip zone, and an area's body is all of it.
  */
-const STRIP = { top: 44, side: 200 } as const
+const STRIP = 44
+// the strip on top is part of an area's smallest height
 const METRICS: Metrics = { gap: 1, minW: 260, minH: 170 }
 const ROOT_BAND = 28
 const EDGE_SHARE = 0.25
-// how close to an end of a tab strip a dragged tab starts scrolling it, by how much, and how often
-const SCROLL_EDGE = 48
-const SCROLL_STEP = 14
-const SCROLL_TICK_MS = 50
 
 interface SlotProps {
   session: SessionInfo
@@ -239,23 +234,23 @@ function PanelHost({ kind, rect, focused }: { kind: PanelKind; rect: Rect; focus
   )
 }
 
-/** What a dragged tab would do where the pointer is. */
-interface DropState {
-  hit: Hit
-  /** The part of the window that lights up; a drop on a tab strip marks a tab instead. */
-  preview: Rect | null
-  target: DropTarget | null
+/** A tab dropped on an area's body or along a side of the window: it joins the area, or gets one of its own. */
+function dropOnArea(id: string, hit: Exclude<Hit, { kind: 'strip' }>): void {
+  if (hit.kind === 'move') moveTabTo(id, hit.groupId, null)
+  else if (hit.kind === 'split') splitTab(id, hit.groupId, hit.edge)
+  else splitTabRoot(id, hit.edge)
 }
 
-const sameDrop = (a: DropState | null, b: DropState | null): boolean =>
-  a === b || (!!a && !!b && JSON.stringify(a.hit) === JSON.stringify(b.hit) && a.target?.id === b.target?.id && a.target?.side === b.target?.side)
-
-/** Where files dragged in from outside would go: into a terminal as paths, or onto a tab strip as folders to open. */
+/**
+ * Where files dragged in from outside would go: into a terminal as paths, or onto a tab strip or
+ * the sidebar's list of tabs as folders to open.
+ */
 interface FileDrop {
   groupId: string
-  /** The session whose terminal takes the paths; missing for a drop on the tab strip. */
+  /** The session whose terminal takes the paths; missing for a drop on a list of tabs. */
   sessionId?: string
-  preview: Rect
+  preview: DropPreview | null
+  mark: DropMark | null
 }
 
 /** The areas of the window: each with its tab strip and the terminal or the panel of the tab it shows. */
@@ -265,16 +260,14 @@ export function Workspace() {
   const layout = useStore((s) => s.layout)
   const searchId = useStore((s) => s.searchId)
   const hasAccount = useStore((s) => s.profiles.some((p) => p.account?.loggedIn))
+  // the tabs are listed in the sidebar: the areas have no strip of their own
   const side = useStore((s) => tabStripOf(s.settings) === 'side')
+  const dropPreview = useStore((s) => s.dropPreview)
   const area = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
-  const [drop, setDrop] = useState<DropState | null>(null)
-  const [fileDrop, setFileDrop] = useState<FileDrop | null>(null)
 
-  const strip = side ? STRIP.side : STRIP.top
-  const stripSide: StripSide = side ? 'left' : 'top'
-  const metrics: Metrics = useMemo(() => ({ ...METRICS, stripSide, strip }), [stripSide, strip])
-  const hitOptions: HitOptions = { strip, stripSide, rootBand: ROOT_BAND, edgeShare: EDGE_SHARE }
+  const strip = side ? 0 : STRIP
+  const hitOptions: HitOptions = { strip, stripSide: 'top', rootBand: ROOT_BAND, edgeShare: EDGE_SHARE }
 
   useLayoutEffect(() => {
     const el = area.current!
@@ -285,12 +278,12 @@ export function Workspace() {
     return () => observer.disconnect()
   }, [])
 
-  const geometry: Geometry = useMemo(() => layoutRects(layout.root, size.w, size.h, metrics), [layout.root, size.w, size.h, metrics])
+  const geometry: Geometry = useMemo(() => layoutRects(layout.root, size.w, size.h, METRICS), [layout.root, size.w, size.h])
   const groups = groupsOf(layout.root)
   const rectOf = new Map(geometry.groups.map((g) => [g.id, g]))
   // the area's rectangle without its tab strip
   const bodyIn = (rect: Rect): Rect => {
-    const body = bodyRect(rect, strip, stripSide)
+    const body = bodyRect(rect, strip)
     return { ...body, w: Math.max(0, body.w), h: Math.max(0, body.h) }
   }
   // the body of the area each shown tab is in
@@ -304,43 +297,41 @@ export function Workspace() {
   /**
    * What the tab being dragged would do with the pointer at a point (client coordinates); null
    * where it cannot be dropped. With `scroll`, a tab strip under the pointer near one of its ends
-   * scrolls a step first.
+   * scrolls a step first. Registered for every tab drag (see `tabDrag.ts`).
    */
-  const dropAt = (clientX: number, clientY: number, scroll: boolean): DropState | null => {
+  const dropAt = (clientX: number, clientY: number, scroll: boolean): TabDrop | null => {
     const id = useStore.getState().tabDrag
     const el = area.current
     if (!id || !el) return null
     const box = el.getBoundingClientRect()
     const hit = hitTest(geometry, size.w, size.h, clientX - box.left, clientY - box.top, hitOptions)
-    if (!hit || !canDrop(layout, id, hit, geometry, size.w, size.h, metrics)) return null
-    if (hit.kind !== 'strip') return { hit, preview: previewRect(geometry, size.w, size.h, hit, hitOptions), target: null }
+    if (!hit || !canDrop(layout, id, hit, geometry, size.w, size.h, METRICS)) return null
+    if (hit.kind !== 'strip') return { preview: previewRect(geometry, size.w, size.h, hit, hitOptions), mark: null, commit: (dragged) => dropOnArea(dragged, hit) }
     const tabStrip = el.querySelector<HTMLElement>(`[data-group="${hit.groupId}"] .tabs`)
-    const tabs = [...(tabStrip?.querySelectorAll<HTMLElement>('.tab') ?? [])]
-    if (tabStrip && scroll) {
-      const { left, right, top, bottom } = tabStrip.getBoundingClientRect()
-      if (side) {
-        if (clientY < top + SCROLL_EDGE) tabStrip.scrollTop -= SCROLL_STEP
-        else if (clientY > bottom - SCROLL_EDGE) tabStrip.scrollTop += SCROLL_STEP
-      } else if (clientX < left + SCROLL_EDGE) tabStrip.scrollLeft -= SCROLL_STEP
-      else if (clientX > right - SCROLL_EDGE) tabStrip.scrollLeft += SCROLL_STEP
-    }
-    // along the strip: left to right in a row, top to bottom in a column
+    if (tabStrip && scroll) scrollAtEdge(tabStrip, clientX, clientY, false)
+    // along the strip, left to right
     const target = dropTarget(
-      tabs.map((tab) => {
-        const { left, right, top, bottom } = tab.getBoundingClientRect()
-        return side ? { id: tab.dataset.id!, left: top, right: bottom } : { id: tab.dataset.id!, left, right }
+      [...(tabStrip?.querySelectorAll<HTMLElement>('.tab') ?? [])].map((tab) => {
+        const { left, right } = tab.getBoundingClientRect()
+        return { id: tab.dataset.id!, left, right }
       }),
-      side ? clientY : clientX
+      clientX
     )
-    return { hit, preview: null, target }
+    return {
+      preview: null,
+      mark: target && { kind: 'tab', tabId: target.id, side: target.side },
+      commit: (dragged) => moveTabTo(dragged, hit.groupId, target?.beforeId ?? null)
+    }
   }
 
   /** What files dragged over a point (client coordinates) would do; null where they cannot go. */
   const filesAt = (clientX: number, clientY: number): FileDrop | null => {
     const el = area.current
     if (!el) return null
-    // a panel, a dialog or a menu that lies over the areas takes no files
     const top = document.elementFromPoint(clientX, clientY)
+    // the list of tabs in the sidebar: the folders open in the area that has the keyboard
+    if (top?.closest('.sidebar-tabs')) return { groupId: layout.focused, preview: null, mark: { kind: 'list' } }
+    // a panel, a dialog or a menu that lies over the areas takes no files
     if (!top || !el.contains(top)) return null
     const box = el.getBoundingClientRect()
     const x = clientX - box.left
@@ -348,26 +339,26 @@ export function Workspace() {
     const rect = geometry.groups.find((g) => x >= g.x && x < g.x + g.w && y >= g.y && y < g.y + g.h)
     const group = rect && groups.find((g) => g.id === rect.id)
     if (!rect || !group) return null
-    if (side ? x < rect.x + strip : y < rect.y + strip) return { groupId: group.id, preview: stripRect(rect, strip, stripSide) }
+    if (y < rect.y + strip) return { groupId: group.id, preview: { rect: stripRect(rect, strip), files: 'open' }, mark: null }
     // typing paths only makes sense into a session that is running; a panel takes none
     const session = sessions.find((s) => s.id === group.active)
     if (!session || session.kind !== 'claude' || session.status !== 'running') return null
-    return { groupId: group.id, sessionId: session.id, preview: bodyIn(rect) }
+    return { groupId: group.id, sessionId: session.id, preview: { rect: bodyIn(rect), files: 'paste' }, mark: null }
   }
 
   /** Files dragged in from outside, as the webview reports them: with positions in physical pixels. */
   const onFileDrag = (event: DragDropEvent): void => {
     if (event.type === 'leave') {
-      setFileDrop(null)
+      showDrop(null, null)
       return
     }
     const scale = window.devicePixelRatio || 1
     const target = filesAt(event.position.x / scale, event.position.y / scale)
     if (event.type !== 'drop') {
-      setFileDrop((prev) => (prev?.groupId === target?.groupId && prev?.sessionId === target?.sessionId ? prev : target))
+      showDrop(target?.preview ?? null, target?.mark ?? null)
       return
     }
-    setFileDrop(null)
+    showDrop(null, null)
     if (!target || event.paths.length === 0) return
     if (!target.sessionId) {
       void openDropped(event.paths, target.groupId)
@@ -383,6 +374,12 @@ export function Workspace() {
   // the handlers below outlive the render that set them up; they reach the current areas through this
   const current = useRef({ dropAt, onFileDrag })
   current.current = { dropAt, onFileDrag }
+
+  // a tab dragged from a strip or from the sidebar's list asks the areas where it would go
+  useEffect(() => {
+    registerWorkspaceDrop((x, y, scroll) => current.current.dropAt(x, y, scroll))
+    return () => registerWorkspaceDrop(null)
+  }, [])
 
   useEffect(() => {
     let unlisten: (() => void) | null = null
@@ -407,67 +404,18 @@ export function Workspace() {
     }
   }, [])
 
-  /** A button went down on a tab: a few pixels on, it drags the tab, to another place in a strip or to an area of its own. */
-  const onTabPointerDown = (e: PointerEvent<HTMLElement>, id: string): void => {
-    let at: { x: number; y: number } | null = null
-    let ticker: ReturnType<typeof setInterval> | undefined
-    const show = (scroll: boolean): DropState | null => {
-      const next = at ? current.current.dropAt(at.x, at.y, scroll) : null
-      setDrop((prev) => (sameDrop(prev, next) ? prev : next))
-      return next
-    }
-    const finish = (): void => {
-      clearInterval(ticker)
-      setDrop(null)
-      endTabDrag()
-    }
-    followDrag(e, {
-      start() {
-        startTabDrag(id)
-        // near an end of a strip it keeps scrolling while the pointer rests there
-        ticker = setInterval(() => show(true), SCROLL_TICK_MS)
-      },
-      move(x, y) {
-        at = { x, y }
-        return show(false) !== null
-      },
-      drop(x, y) {
-        // null when the tab closed during the drag
-        const dragged = useStore.getState().tabDrag
-        const next = current.current.dropAt(x, y, false)
-        finish()
-        if (!dragged || !next) {
-          refocus()
-          return
-        }
-        const { hit } = next
-        if (hit.kind === 'strip') moveTabTo(dragged, hit.groupId, next.target?.beforeId ?? null)
-        else if (hit.kind === 'move') moveTabTo(dragged, hit.groupId, null)
-        else if (hit.kind === 'split') splitTab(dragged, hit.groupId, hit.edge)
-        else splitTabRoot(dragged, hit.edge)
-      },
-      cancel() {
-        finish()
-        refocus()
-      }
-    })
-  }
-
-  const markFor = (groupId: string): StripMark | null =>
-    drop?.hit.kind === 'strip' && drop.hit.groupId === groupId && drop.target ? { tabId: drop.target.id, side: drop.target.side } : null
-
   // no tab at all: the one area there is tells how to start
   const emptyRect = flatten(layout).length === 0 ? rectOf.get(groups[0].id) : undefined
   const emptyBody = emptyRect && bodyIn(emptyRect)
+  const preview = dropPreview?.rect
 
   return (
-    <div className={`workspace${side ? ' side' : ''}`} ref={area} style={{ '--strip': `${strip}px` } as CSSProperties}>
-      {groups.map((group) => {
-        const rect = rectOf.get(group.id)
-        return rect ? (
-          <GroupTabs key={group.id} group={group} rect={rect} focused={group.id === layout.focused} mark={markFor(group.id)} onTabPointerDown={onTabPointerDown} />
-        ) : null
-      })}
+    <div className={`workspace${side ? ' side' : ''}${groups.length > 1 ? ' areas' : ''}`} ref={area} style={{ '--strip': `${strip}px` } as CSSProperties}>
+      {!side &&
+        groups.map((group) => {
+          const rect = rectOf.get(group.id)
+          return rect ? <GroupTabs key={group.id} group={group} rect={rect} focused={group.id === layout.focused} /> : null
+        })}
       {/* keyed by the panel, so that one dragged to another area keeps what it shows */}
       {groups.map((group) => {
         const kind = group.active ? panelKindOf(group.active) : null
@@ -479,7 +427,7 @@ export function Workspace() {
           <div className="empty-title">No open sessions</div>
           <div className="muted">
             {hasAccount
-              ? 'Use the + in the tab bar (Ctrl+Shift+T) to pick an account and a folder and start Claude Code.'
+              ? `Use the + ${side ? 'at the bottom of the sidebar' : 'in the tab bar'} (Ctrl+Shift+T) to pick an account and a folder and start Claude Code.`
               : 'Log in to the account on the left to get started.'}
           </div>
           {hasAccount && (
@@ -503,10 +451,12 @@ export function Workspace() {
       {geometry.dividers.map((divider) => (
         <Divider key={divider.splitId} divider={divider} area={area} />
       ))}
-      {drop?.preview && <div className="drop-preview" style={{ left: drop.preview.x, top: drop.preview.y, width: drop.preview.w, height: drop.preview.h }} />}
-      {fileDrop && (
-        <div className="drop-preview files" style={{ left: fileDrop.preview.x, top: fileDrop.preview.y, width: fileDrop.preview.w, height: fileDrop.preview.h }}>
-          {fileDrop.sessionId ? 'Drop to insert the path' : 'Drop to open the folder here'}
+      {dropPreview && preview && (
+        <div
+          className={`drop-preview${dropPreview.files ? ' files' : ''}`}
+          style={{ left: preview.x, top: preview.y, width: preview.w, height: preview.h }}
+        >
+          {dropPreview.files === 'paste' ? 'Drop to insert the path' : dropPreview.files === 'open' ? 'Drop to open the folder here' : null}
         </div>
       )}
     </div>

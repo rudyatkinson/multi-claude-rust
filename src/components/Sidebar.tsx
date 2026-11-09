@@ -1,21 +1,26 @@
+import { tabStripOf } from '@shared/types'
 import { isActiveRun } from '@shared/workflows'
 import { NEWEST_VERSION, useChangelogSeen } from '../changelog'
 import { isPanelShown, setModal, toggleSidebar, togglePanel, useStore } from '../store'
-import { AccountCard } from './AccountCard'
-import { AccountMini } from './AccountMini'
+import { AccountsBlock, SplitLine } from './AccountsBlock'
 import { useUnsaved } from '../library'
 import { showUpdateBar, useUpdate } from '../updates'
-import { HistoryIcon, LibraryIcon, SettingsIcon, SidebarIcon, SparkleIcon, WorkflowIcon } from './icons'
+import { HistoryIcon, LibraryIcon, PersonPlusIcon, SettingsIcon, SidebarIcon, SparkleIcon, WorkflowIcon } from './icons'
+import { SidebarTabs } from './SidebarTabs'
 
 const NO_CLAUDE = 'claude was not found. Set its path in Settings.'
 
-/** The account list. Collapsed, it narrows to a strip of initials with small usage bars. */
+/**
+ * The account cards and, with the tabs in the sidebar (Settings → Window → Tab strip), the list
+ * of tabs under them with a line between the two to share the room. Collapsed, it narrows to a
+ * strip of initials with small usage bars, and of tab marks.
+ */
 export function Sidebar() {
-  const profiles = useStore((s) => s.profiles)
   const claude = useStore((s) => s.claude)
   const appVersion = useStore((s) => s.appVersion)
   const ready = useStore((s) => s.ready)
   const collapsed = useStore((s) => s.sidebarCollapsed)
+  const withTabs = useStore((s) => tabStripOf(s.settings) === 'side')
   // on while the panel's tab is the one its area shows; pressing it again then closes the tab
   const workflowsOn = useStore((s) => isPanelShown(s.layout, 'workflows'))
   const libraryOn = useStore((s) => isPanelShown(s.layout, 'library'))
@@ -26,31 +31,23 @@ export function Sidebar() {
   const versions = [claude.version && `Claude Code ${claude.version.replace(/\s*\(.*\)$/, '')}`, appVersion && `Multi Claude ${appVersion}`].filter(Boolean).join(' | ')
 
   return (
-    <aside className={`sidebar${collapsed ? ' mini' : ''}`}>
+    <aside className={`sidebar${collapsed ? ' mini' : ''}${withTabs ? ' with-tabs' : ''}`}>
       {ready && !claude.path && (
         <button className="alert" title={collapsed ? NO_CLAUDE : undefined} onClick={() => setModal({ type: 'settings' })}>
           {collapsed ? '!' : NO_CLAUDE}
         </button>
       )}
 
-      <div className="cards">
-        {profiles.map((profile) =>
-          collapsed ? <AccountMini key={profile.id} profile={profile} /> : <AccountCard key={profile.id} profile={profile} />
-        )}
-      </div>
+      <AccountsBlock withTabs={withTabs} />
+      {withTabs && !collapsed && <SplitLine />}
+      {withTabs && <SidebarTabs />}
 
       <div className="sidebar-foot">
-        {!collapsed && (
-          <button className="btn full" disabled={!claude.path} onClick={() => setModal({ type: 'addAccount' })}>
-            + Add account
-          </button>
-        )}
         <div className="sidebar-actions">
-          {collapsed && (
-            <button className="icon-btn foot-btn" title="Add account" disabled={!claude.path} onClick={() => setModal({ type: 'addAccount' })}>
-              +
-            </button>
-          )}
+          {/* two buttons wide while the sidebar is open */}
+          <button className="icon-btn foot-btn wide" title="Add account" disabled={!claude.path} onClick={() => setModal({ type: 'addAccount' })}>
+            <PersonPlusIcon />
+          </button>
           <button className="icon-btn foot-btn" title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (Ctrl+Shift+B)`} onClick={toggleSidebar}>
             <SidebarIcon />
           </button>

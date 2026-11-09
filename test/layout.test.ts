@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   activate,
   activeIdOf,
+  bodyRect,
   canDrop,
   canSplit,
   cycleTab,
@@ -30,6 +31,7 @@ import {
   setRatio,
   splitRoot,
   splitWith,
+  stripRect,
   tabAt,
   visibleIds,
   type Edge,
@@ -637,6 +639,46 @@ describe('strip on the left', () => {
     expect(canDrop(row, 'a', { kind: 'split', groupId: 'g1', edge: 'bottom' }, geo, W, H, metrics)).toBe(true)
     expect(canDrop(row, 'a', { kind: 'root', edge: 'left' }, geo, W, H, metrics)).toBe(false)
     expect(canDrop(row, 'a', { kind: 'root', edge: 'bottom' }, geo, W, H, metrics)).toBe(true)
+  })
+})
+
+describe('no strip (the tabs in the sidebar)', () => {
+  const W = 1000
+  const H = 600
+  const metrics: Metrics = { gap: 1, minW: 260, minH: 170 }
+  const options: HitOptions = { strip: 0, stripSide: 'top', rootBand: 28, edgeShare: 0.25 }
+  const row = splitWith(one('a', 'b', 'c'), 'c', 'g1', 'right')
+  const right = groupOf(row, 'c')!.id
+
+  it('has no strip zone: the top of an area is a side of its body', () => {
+    const geo = layoutRects(one('a', 'b').root, W, H, metrics)
+    const hit = (x: number, y: number): Hit | null => hitTest(geo, W, H, x, y, options)
+    for (const [x, y] of [
+      [500, 0],
+      [500, 5],
+      [10, 0],
+      [990, 599]
+    ]) {
+      expect(hit(x, y)?.kind).not.toBe('strip')
+    }
+    expect(hit(500, 0)).toEqual({ kind: 'split', groupId: 'g1', edge: 'top' })
+    expect(hit(500, 300)).toEqual({ kind: 'move', groupId: 'g1' })
+    expect(hit(500, 590)).toEqual({ kind: 'split', groupId: 'g1', edge: 'bottom' })
+  })
+
+  it('gives every area its full height as its body', () => {
+    const geo = layoutRects(row.root, W, H, metrics)
+    for (const g of geo.groups) {
+      expect(bodyRect(g, 0)).toEqual({ x: g.x, y: g.y, w: g.w, h: g.h })
+      expect(stripRect(g, 0).h).toBe(0)
+    }
+    const r = geo.groups.find((g) => g.id === right)!
+    expect(previewRect(geo, W, H, { kind: 'move', groupId: right }, options)).toEqual({ x: r.x, y: r.y, w: r.w, h: r.h })
+    // along the top of the window there is no band: the strips are gone, but the top keeps belonging to the areas
+    const hit = (x: number, y: number): Hit | null => hitTest(geo, W, H, x, y, options)
+    expect(hit(800, 3)).toEqual({ kind: 'split', groupId: right, edge: 'top' })
+    expect(hit(5, 300)).toEqual({ kind: 'root', edge: 'left' })
+    expect(hit(800, 595)).toEqual({ kind: 'root', edge: 'bottom' })
   })
 })
 

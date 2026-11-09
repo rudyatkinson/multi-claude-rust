@@ -12,7 +12,8 @@ const MARGIN = 6
 
 /**
  * Picks the account and the folder of a new session. Opens below the "+" of the area the session
- * is for, and stays inside the window however narrow that area is.
+ * is for, or beside the "+" at the foot of the sidebar's list of tabs, and stays inside the window
+ * however narrow that area is.
  */
 export function NewSessionPopover({ groupId }: { groupId: string }) {
   const profiles = useStore((s) => s.profiles)
@@ -33,11 +34,12 @@ export function NewSessionPopover({ groupId }: { groupId: string }) {
 
   useLayoutEffect(() => {
     const el = ref.current
-    const button = document.querySelector(`[data-group="${groupId}"] .tab-new`)
+    // with the tabs in the sidebar the areas have no "+" of their own
+    const button = document.querySelector(`[data-group="${groupId}"] .tab-new`) ?? document.querySelector('.sidebar-tabs .tab-new')
     if (!el) return
     const anchor = button?.getBoundingClientRect() ?? { left: MARGIN, right: MARGIN, bottom: MARGIN }
-    // the "+" of a column strip is at its foot: the picker opens beside it, upwards
-    const side = button?.closest('.tabbar.side') != null
+    // the sidebar's "+" is at the foot of its list: the picker opens beside it, upwards
+    const side = button?.closest('.sidebar-tabs') != null
     const { width, height } = el.getBoundingClientRect()
     setPos({
       left: Math.max(MARGIN, Math.min(side ? anchor.right + 4 : anchor.left, window.innerWidth - width - MARGIN)),

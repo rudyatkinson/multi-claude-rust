@@ -436,10 +436,11 @@ export function SettingsDialog() {
                 Top
               </button>
               <button type="button" role="radio" aria-checked={tabStrip === 'side'} className={tabStrip === 'side' ? 'selected' : ''} onClick={() => setTabStrip('side')}>
-                Left
+                Sidebar
               </button>
             </div>
           </div>
+          <p className="note">Sidebar: the tabs are listed under the accounts; drag the line between them to make room.</p>
           <label className="check">
             <input type="checkbox" checked={tray} onChange={(e) => setTray(e.target.checked)} />
             Keep running in the tray when the window is closed

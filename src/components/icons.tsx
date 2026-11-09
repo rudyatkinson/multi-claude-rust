@@ -107,3 +107,27 @@ export function SidebarIcon() {
     </Icon>
   )
 }
+
+/** A person with a plus beside it: add an account. */
+export function PersonPlusIcon() {
+  return (
+    <Icon>
+      <circle cx="9" cy="8" r="4" />
+      <path d="M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1" />
+      <path d="M19 8v6" />
+      <path d="M16 11h6" />
+    </Icon>
+  )
+}
+
+/** Two people, one behind the other: the other accounts. */
+export function PeopleIcon() {
+  return (
+    <Icon>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20v-.5A5.5 5.5 0 0 1 8 14h2a5.5 5.5 0 0 1 5.5 5.5v.5" />
+      <path d="M16 4.6a3.5 3.5 0 0 1 0 6.8" />
+      <path d="M18.5 14.2a5.5 5.5 0 0 1 3 4.8v1" />
+    </Icon>
+  )
+}

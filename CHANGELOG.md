@@ -3,6 +3,17 @@
 All notable changes to Multi Claude. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This file is shown inside the app under **What's new**.
 
+## [0.6.2] - 2026-11-09
+
+### Added
+- **Tabs in the sidebar.** Settings → Window → **Tab strip: Sidebar** lists every tab under the account cards, grouped under "Area 1", "Area 2" headers when the window is split; the areas then have no strip of their own. Drag the line between the accounts and the tabs to share the room, double-click it for the default height. **+ New session** at the foot of the list starts a session in the area that has the keyboard. Drag a tab within the list, onto another area's header, or out onto the areas to split them; a folder dropped on the list opens there. Collapsed, the sidebar shows one mark per tab.
+- **A single account card.** Drag the line up to the top and the accounts fold to the card of the active tab's account. Its **Other accounts** button lists the rest with their usage bars, refresh and menu, over the terminal if need be; click one to show it in the card until another tab comes to the front.
+
+### Changed
+- **Tab strip: Left is now Sidebar.** The column of tabs beside each area gives way to the list in the sidebar; a saved "Left" opens as Sidebar.
+- **Add account** moved from its own row into the footer's icon row, as its first, double-width button.
+- An account's menu opens above its button where the window ends, and a list that scrolls no longer cuts it off.
+
 ## [0.6.1] - 2026-11-09
 
 ### Fixed

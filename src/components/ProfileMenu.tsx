@@ -1,9 +1,11 @@
-import { useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { ProfileView } from '@shared/types'
 import { mc } from '../api'
 import { ago } from '../format'
 import { useDismiss } from '../hooks'
 import { ask, attempt, mainProfileName, setActive, setModal, toast, useStore } from '../store'
+
+const MARGIN = 6
 
 interface Props {
   profile: ProfileView
@@ -54,12 +56,30 @@ async function remove(profile: ProfileView): Promise<void> {
   if (ok) await attempt(mc.invoke('profiles:delete', profile.id))
 }
 
+/**
+ * An account's menu. It opens under the `data-trigger` button next to it, flush with its right
+ * edge, or above it where the window ends; placed on the window, so that a list that scrolls
+ * (the cards, the other accounts) does not cut it off.
+ */
 export function ProfileMenu({ profile, updatedAt, onClose }: Props) {
   // ticks, so the "updated" line stays current while the menu is open
   const now = useStore((s) => s.now)
   const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
 
   useDismiss(ref, onClose)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    const trigger = el?.parentElement?.querySelector('[data-trigger]')?.getBoundingClientRect()
+    if (!el || !trigger) return
+    const { width, height } = el.getBoundingClientRect()
+    const below = trigger.bottom + 4
+    setPos({
+      left: Math.max(MARGIN, Math.min(trigger.right - width, window.innerWidth - width - MARGIN)),
+      top: below + height <= window.innerHeight - MARGIN ? below : Math.max(MARGIN, trigger.top - 4 - height)
+    })
+  }, [])
 
   const item = (label: string, action: () => unknown, danger = false) => (
     <button
@@ -76,7 +96,7 @@ export function ProfileMenu({ profile, updatedAt, onClose }: Props) {
   const loggedIn = profile.account?.loggedIn === true
   const tokenAccount = profile.auth === 'token'
   return (
-    <div className="menu" ref={ref}>
+    <div className="menu profile-menu" ref={ref} style={pos ?? { left: 0, top: 0, visibility: 'hidden' }}>
       <div className="menu-head">
         {profile.account?.email && <div className="menu-email">{profile.account.email}</div>}
         {tokenAccount && <div className="menu-email">OAuth token</div>}

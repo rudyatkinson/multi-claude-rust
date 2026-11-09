@@ -63,7 +63,9 @@ button:disabled {
 
 /* ---------- sidebar ---------- */
 
+/* positioned for the marker of the line between the accounts and the tabs */
 .sidebar {
+  position: relative;
   width: 284px;
   flex: none;
   display: flex;
@@ -82,15 +84,12 @@ button:disabled {
 }
 
 .sidebar-foot {
+  flex: none;
   padding: 10px;
   border-top: 1px solid var(--border);
 }
 
-/* the account button on a row of its own; the icon buttons below it, spread over the width */
-.sidebar-foot > .btn.full {
-  margin-bottom: 8px;
-}
-
+/* the icon buttons, spread over the width; Add account first, two buttons wide */
 .sidebar-actions {
   display: flex;
   align-items: center;
@@ -109,6 +108,10 @@ button:disabled {
 .icon-btn.foot-btn svg {
   width: 18px;
   height: 18px;
+}
+
+.icon-btn.foot-btn.wide {
+  width: 64px;
 }
 
 .version {
@@ -159,11 +162,15 @@ button:disabled {
   padding: 8px 0;
 }
 
-/* the seven buttons in a column, about 240 px tall */
+/* the seven buttons in a column, about 240 px tall; Add account as wide as the others */
 .sidebar.mini .sidebar-actions {
   flex-direction: column;
   justify-content: flex-start;
   gap: 4px;
+}
+
+.sidebar.mini .icon-btn.foot-btn.wide {
+  width: 30px;
 }
 
 .sidebar.mini .alert {
@@ -238,6 +245,397 @@ button:disabled {
 
 .mini-bar .fill {
   display: block;
+}
+
+/* a limit's short name in front of its bar, in the list of the other accounts */
+.mini-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 14px;
+}
+
+.mini-limit .mini-bar {
+  width: 40px;
+}
+
+/* ---------- tabs in the sidebar (Settings → Window → Tab strip: Sidebar) ---------- */
+
+/* the accounts are as tall as the line below them says (a `max-height` set by the sidebar) and
+   scroll; the tab list takes the rest. In a short window the accounts give way first. */
+.sidebar.with-tabs .accounts {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.sidebar.mini.with-tabs .accounts {
+  max-height: 40%;
+}
+
+/* the line between the accounts and the tabs: 6 px to grab, a 1 px line that lights up */
+.sidebar-split {
+  position: relative;
+  flex: none;
+  height: 6px;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.sidebar-split::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2.5px;
+  height: 1px;
+  background: var(--border);
+}
+
+.sidebar-split:hover::before,
+.sidebar-split.dragging::before {
+  top: 2px;
+  height: 2px;
+  background: var(--brand);
+}
+
+/* where the line goes when it is let go; dashed where the accounts fold to one card */
+.sidebar-split-ghost {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  height: 2px;
+  margin-top: 2px;
+  background: var(--brand);
+  pointer-events: none;
+}
+
+.sidebar-split-ghost.one {
+  background: repeating-linear-gradient(90deg, var(--brand) 0 6px, transparent 6px 10px);
+}
+
+.sidebar-split-ghost.one::after {
+  content: 'One card';
+  position: absolute;
+  top: 5px;
+  right: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--brand);
+  color: #1a1a19;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* the tab list: its rows scroll, "+ New session" stays at its foot */
+.sidebar-tabs {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-tab-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar-tabs .area {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* files from outside over the list: their folders open in the area that has the keyboard */
+.sidebar-tabs.files {
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+
+.sidebar-tabs.files::after {
+  content: 'Drop to open the folder';
+  position: absolute;
+  left: 50%;
+  bottom: 46px;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: 5px;
+  background: var(--raised);
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* "Area 1", "Area 2": the one that has the keyboard in the colour of the tab it shows */
+.area-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 6px 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.area-head:hover {
+  color: var(--text);
+}
+
+.area-head.focused {
+  color: var(--accent, var(--text));
+}
+
+.area-head.focused::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent, var(--text));
+}
+
+.area-count {
+  margin-left: auto;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* a dragged tab would go to the end of that area */
+.area-head.drop-into {
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--brand);
+}
+
+/* a tab: a full-width row, marked on its left in its account's colour while its area shows it */
+.sidebar-tabs .tab {
+  width: 100%;
+  max-width: none;
+  min-height: 42px;
+  padding: 4px 4px 4px 9px;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+}
+
+.sidebar-tabs .tab.active {
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+  border-left-color: var(--accent);
+}
+
+.sidebar-tabs .area:not(.focused) .tab.active {
+  background: var(--card);
+  border-left-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.sidebar-tabs .tab-text {
+  flex: 1;
+}
+
+.sidebar-tabs .tab-rename {
+  width: 100%;
+}
+
+/* where a dragged tab would land: above or below a row */
+.sidebar-tabs .tab.drop-before {
+  box-shadow: inset 0 2px 0 var(--brand);
+}
+
+.sidebar-tabs .tab.drop-after {
+  box-shadow: inset 0 -2px 0 var(--brand);
+}
+
+.sidebar-tabs .tab-new.row {
+  flex: none;
+  justify-content: flex-start;
+  width: auto;
+  height: 36px;
+  padding: 0 18px;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 12.5px;
+}
+
+/* collapsed: one mark per tab, a thin line between two areas */
+.sidebar.mini .sidebar-tabs {
+  min-height: 60px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar.mini .sidebar-tab-list {
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+.sidebar.mini .sidebar-tabs .area {
+  align-items: center;
+}
+
+.mini-tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.mini-tab:hover {
+  background: var(--card);
+}
+
+.mini-tab.active {
+  background: var(--card);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.sidebar-tabs .area:not(.focused) .mini-tab.active {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.mini-tab.active .tab-icon {
+  color: var(--text);
+}
+
+.mini-tab.attention .tab-state {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.mini-area-sep {
+  flex: none;
+  width: 28px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.sidebar-tabs .tab-new.mini-tab.new {
+  width: 40px;
+  height: 30px;
+  margin: 4px auto 6px;
+  font-size: 18px;
+}
+
+/* the single card's button with the other accounts, and how many there are */
+.icon-btn.others {
+  position: relative;
+}
+
+.others-count {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border: 2px solid var(--card);
+  border-radius: 8px;
+  background: var(--border);
+  color: var(--text);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 11px;
+}
+
+/* the other accounts: beside their button, over the terminals if need be */
+.popover.other-accounts {
+  position: fixed;
+  z-index: 35;
+  width: 320px;
+  max-width: calc(100vw - 12px);
+  gap: 2px;
+  padding: 8px;
+}
+
+.popover.other-accounts .popover-title {
+  padding: 0 6px 4px;
+}
+
+.other-account {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  border-radius: 6px;
+}
+
+.other-account:hover {
+  background: var(--card);
+}
+
+.other-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 6px 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+}
+
+.other-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.other-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.other-account.off .dot {
+  opacity: 0.4;
+}
+
+.other-bars,
+.other-status {
+  padding-left: 15px;
+}
+
+.other-bars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+}
+
+.other-status {
+  font-size: 11.5px;
+}
+
+.other-login {
+  flex: none;
+  margin-right: 4px;
 }
 
 /* ---------- account card ---------- */
@@ -651,6 +1049,13 @@ button:disabled {
   background: var(--border);
 }
 
+/* an account's menu: placed under its ⋯ by its component, so that no scrolling list cuts it off */
+.menu.profile-menu {
+  position: fixed;
+  right: auto;
+  z-index: 36;
+}
+
 /* a menu at the pointer: placed by its component, above everything but dialogs */
 .menu.tab-menu {
   position: fixed;
@@ -675,8 +1080,8 @@ button:disabled {
   background: var(--term-bg);
 }
 
-/* the areas: each has a tab strip, on top or on its left, and shows the terminal or the panel of
-   one of its tabs beside it; `--strip` is set by the workspace (44 px on top, 200 px on the left) */
+/* the areas: each has a tab strip on top and shows the terminal or the panel of one of its tabs
+   below it; `--strip` is set by the workspace (44 px; 0 with the tabs in the sidebar) */
 .workspace {
   --strip: 44px;
   position: relative;
@@ -964,70 +1369,6 @@ body.pointer-drag.no-drop * {
   background: var(--amber);
 }
 
-/* ---------- tab strip on the left ---------- */
-
-/* a column of full-width rows; the "+" and the ▾ at its foot */
-.tabbar.side {
-  flex-direction: column;
-  width: var(--strip);
-  border-bottom: 0;
-  border-right: 1px solid var(--border);
-}
-
-.tabbar.side .tabs {
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.tabbar.side .tab {
-  width: 100%;
-  max-width: none;
-  min-height: 44px;
-  padding: 5px 6px 5px 10px;
-  border-top: 0;
-  border-right: 0;
-  border-bottom: 1px solid var(--border);
-  border-left: 2px solid transparent;
-}
-
-.tabbar.side .tab.active {
-  border-left-color: var(--accent);
-}
-
-.tabbar.side:not(.focused) .tab.active {
-  border-left-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.tabbar.side .tab-text {
-  flex: 1;
-}
-
-.tabbar.side .tab-rename {
-  width: 100%;
-}
-
-/* where a dragged tab would land: above or below a row */
-.tabbar.side .tab.drop-before {
-  box-shadow: inset 0 2px 0 var(--brand);
-}
-
-.tabbar.side .tab.drop-after {
-  box-shadow: inset 0 -2px 0 var(--brand);
-}
-
-.tabbar.side .tab-actions {
-  height: 34px;
-  border-top: 1px solid var(--border);
-}
-
-.tabbar.side .tab-new {
-  flex: 1;
-  width: auto;
-}
-
 /* ---------- the list of all the tabs of an area ---------- */
 
 .menu.tab-list {
@@ -1089,6 +1430,20 @@ body.pointer-drag.no-drop * {
 
 .slot.shown {
   display: flex;
+}
+
+/* with the tabs in the sidebar and several areas: the one that has the keyboard shows a line in
+   its account's colour along its top, as its tab would in a strip */
+.workspace.side.areas .slot.focused::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* a sleeping session: its terminal shows what it last said, dimmed, under a button that wakes it;

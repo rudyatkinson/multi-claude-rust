@@ -26,7 +26,7 @@ To run a second instance next to the installed app, for example while developing
 ## Accounts
 
 - The **main** profile is the existing `~/.claude` folder, used as it is.
-- **Add account** creates a new profile folder (`~/.multi-claude/profiles/<name>`) and opens a login tab. The login happens in the browser; if another Claude account is signed in there, open the link in a private window.
+- **Add account** (the wide button on the left of the sidebar's footer) creates a new profile folder (`~/.multi-claude/profiles/<name>`) and opens a login tab. The login happens in the browser; if another Claude account is signed in there, open the link in a private window.
 - The main profile's `agents`, `skills`, `commands` and `plugins` folders are linked into the new profile (junctions on Windows). `settings.json`, `CLAUDE.md` and `keybindings.json` are copied; when they change in the main profile, the card shows a sync icon.
 - With "Keep model and effort settings separate" ticked, a sync leaves the profile's own `model`, `effortLevel` and `modelSettings` alone.
 - MCP servers, the theme and folder trust stay separate for each account. Install plugins from the main account.
@@ -47,7 +47,9 @@ Claude Code reports less for these accounts, so they are more limited:
 
 ## Sidebar
 
-The buttons at the foot of the sidebar collapse or expand it (Ctrl+Shift+B), open Workflows and the Library, find a past conversation (Ctrl+Shift+H), and open **What's new** and Settings. **What's new** shows the changelog; a dot on it marks a version you have not read yet. Under the buttons stand both versions, `Claude Code <version> | Multi Claude <version>`, followed by `↑ <version>` while an update waits (see [Updates](#updates)).
+The buttons at the foot of the sidebar add an account (the double-width one on the left), collapse or expand the sidebar (Ctrl+Shift+B), open Workflows and the Library, find a past conversation (Ctrl+Shift+H), and open **What's new** and Settings. **What's new** shows the changelog; a dot on it marks a version you have not read yet. Under the buttons stand both versions, `Claude Code <version> | Multi Claude <version>`, followed by `↑ <version>` while an update waits (see [Updates](#updates)).
+
+Collapsed, the sidebar shows each account as its initials with a thin bar per usage limit, and, with the tabs in the sidebar, one mark per tab.
 
 ## Tabs
 
@@ -55,7 +57,7 @@ A tab shows the conversation's topic as Claude Code names it, with the folder, t
 
 The app knows why Claude stopped through hooks it adds to every session it starts. They post to a port on this computer only and come on top of your own hooks. If hooks are switched off in Claude Code's settings (`disableAllHooks`), or the app cannot open its port, tabs work without them: the mark then only tells working from waiting, as read from the terminal title.
 
-The **+** in the tab bar picks the account and the folder of a new session. Each account shows how much of its 5-hour limit is used (its weekly limit, for a plan without a 5-hour limit). A session starts in one of three ways:
+The **+** in the tab bar (with the tabs in the sidebar, **+ New session** at the foot of their list) picks the account and the folder of a new session. Each account shows how much of its 5-hour limit is used (its weekly limit, for a plan without a 5-hour limit). A session starts in one of three ways:
 
 - **New:** a new conversation.
 - **Continue last:** the folder's most recent conversation (`claude -c`).
@@ -68,14 +70,24 @@ The **+** in the tab bar picks the account and the folder of a new session. Each
 - **Right-click** a tab for more: **Duplicate** opens a new conversation with the same account and folder next to it, **Open folder in Explorer** shows its folder, and **Close others** and **Close tabs to the right** close several tabs of the same area after a single confirmation.
 - **Middle-click** closes a tab.
 - When an area has more tabs than its strip can show, a `▾` with their number appears next to its **+**. It lists every tab of the area (the arrow keys, Home and End move through the list); pick one to bring it into view.
-- Settings → **Window → Tab strip: Left** puts each area's tabs in a column on its left instead of a row on top, with **+** and `▾` at its foot.
+
+#### Tabs in the sidebar
+
+Settings → **Window → Tab strip: Sidebar** lists the tabs in the sidebar, under the account cards, instead of a row on top of each area; the areas then have no strip of their own.
+
+- With several areas, the list is grouped under "Area 1", "Area 2" headers in reading order (left before right, top before bottom). The header of the area that has the keyboard shows the colour of the tab it shows, and that area has a line in that colour along its top; click a header to give its area the keyboard.
+- The rows work as in a strip: click, rename, middle-click, right-click. Drag a row within the list to reorder it, onto another area's header to move it to the end of that area, or out onto the areas to move it there or split one (see [Areas](#areas)).
+- **+ New session** at the foot of the list starts a session in the area that has the keyboard.
+- Drag the line between the accounts and the tabs to share the room between them; double-click it for the default height. The app remembers where you left it.
+- Drag the line up to the top and the accounts fold to a single card: the account of the active tab. The **Other accounts** button at the end of its head lists the rest, with their plan, running sessions, usage bars, refresh button and menu, reaching over the terminal if need be. Click one to show it in the card until another tab comes to the front. Drag the line down again to see all cards.
+- Collapsed (Ctrl+Shift+B), the sidebar shows one mark per tab under the accounts' initials; hover one for its title and account, click it to bring it to the front.
 
 ### Areas
 
-The window can be divided into areas, each with its own tab strip and its own **+**. Drag a tab to make or change them:
+The window can be divided into areas, each with its own tab strip and its own **+** (with the tabs in the sidebar, a group of rows under its "Area" header). Drag a tab to make or change them:
 
 - onto the **left, right, top or bottom part of an area**: that area is split and the tab gets the new half;
-- onto the **middle of an area** or onto its **tab strip**: the tab moves into that area;
+- onto the **middle of an area**, onto its **tab strip** or onto its header in the sidebar: the tab moves into that area;
 - onto the **left, right or bottom edge of the window** (when there are several areas): the tab gets an area along that whole side.
 
 A highlight shows what a drop would do. An area whose last tab leaves or closes disappears, and its neighbour takes the room. Drag the line between two areas to resize them (double-click for equal halves); an area cannot be made smaller than it can be used.
@@ -100,7 +112,7 @@ Every tab runs its own `claude` process, a couple of hundred megabytes each, eve
 
 ### Dropping files
 
-Drop files or folders from Explorer onto a terminal to type their paths into it, quoted where needed, for example to hand Claude a screenshot or a file to read. Drop a folder onto an area's tab strip to open a session there in that folder; a file dropped there stands for the folder it is in.
+Drop files or folders from Explorer onto a terminal to type their paths into it, quoted where needed, for example to hand Claude a screenshot or a file to read. Drop a folder onto an area's tab strip to open a session there in that folder; a file dropped there stands for the folder it is in. With the tabs in the sidebar, drop it onto their list instead: the session opens in the area that has the keyboard.
 
 ### Finding text
 

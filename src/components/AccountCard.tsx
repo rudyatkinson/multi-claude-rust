@@ -1,4 +1,4 @@
-import { useCallback, useState, type CSSProperties } from 'react'
+import { useCallback, useState, type CSSProperties, type ReactNode } from 'react'
 import type { ProfileView } from '@shared/types'
 import { mc } from '../api'
 import { ago, planLabel } from '../format'
@@ -7,7 +7,8 @@ import { RefreshIcon, SyncIcon } from './icons'
 import { ProfileMenu, loginProfile, syncProfile } from './ProfileMenu'
 import { UsageRows } from './UsageBar'
 
-export function AccountCard({ profile }: { profile: ProfileView }) {
+/** An account's card: its name, plan and running sessions, its usage, and its buttons. `extra` comes last in its head. */
+export function AccountCard({ profile, extra }: { profile: ProfileView; extra?: ReactNode }) {
   const usage = useStore((s) => s.usage[profile.id])
   const now = useStore((s) => s.now)
   const claudeFound = useStore((s) => s.claude.path !== null)
@@ -72,6 +73,7 @@ export function AccountCard({ profile }: { profile: ProfileView }) {
         <button className="icon-btn" data-trigger title="Account menu" onClick={() => setMenuOpen(!menuOpen)}>
           ⋯
         </button>
+        {extra}
       </div>
 
       {loggedIn && (hasUsage || !tokenAccount) ? (
