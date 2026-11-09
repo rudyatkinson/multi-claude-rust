@@ -3,6 +3,11 @@
 All notable changes to Multi Claude. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This file is shown inside the app under **What's new**.
 
+## [0.6.3] - 2026-11-09
+
+### Fixed
+- An Ultra account was labelled Max and kept a stale 5-hour row. Claude Code now reports the plan tier (`planTier`, `max_20x` for Ultra), which the badge follows, and a `/usage` report that lists weekly limits only drops the 5-hour window instead of keeping the one from before the plan changed.
+
 ## [0.6.2] - 2026-11-09
 
 ### Added

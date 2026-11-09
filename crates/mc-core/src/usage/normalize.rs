@@ -194,8 +194,16 @@ pub fn merge_usage(prev: Option<&UsageState>, sample: &UsageSample, now: i64) ->
 /// `/usage` is the server's current answer, so it replaces what was known; a window it did not
 /// report stays as it was, and its model limits replace the old ones.
 pub fn apply_probe(prev: Option<&UsageState>, result: &ProbeResult, now: i64) -> UsageState {
+    // `/usage` lists every window the plan has. Weekly lines without a session line mean the plan
+    // has no 5-hour limit (Ultra): a window kept from before the plan changed goes.
+    let has_weekly = result.seven_day.is_some() || !result.models.is_empty();
+    let five_hour = match &result.five_hour {
+        Some(window) => Some(window.clone()),
+        None if has_weekly => None,
+        None => prev.and_then(|p| p.five_hour.clone()),
+    };
     UsageState {
-        five_hour: result.five_hour.clone().or_else(|| prev.and_then(|p| p.five_hour.clone())),
+        five_hour,
         seven_day: result.seven_day.clone().or_else(|| prev.and_then(|p| p.seven_day.clone())),
         models: Some(result.models.clone()),
         observed_at: Some(now),
@@ -377,5 +385,18 @@ mod tests {
             UsageState { five_hour: win(20.0, RESET + 5 * HOUR), seven_day: known.seven_day.clone(), models: Some(vec![]), observed_at: Some(NOW + 10) }
         );
         assert_eq!(apply_probe(None, &result, NOW).seven_day, None);
+    }
+
+    #[test]
+    fn a_probe_with_weekly_lines_but_no_session_line_drops_the_5_hour_window() {
+        // an Ultra plan: `/usage` prints the weekly limits only
+        let known = UsageState { five_hour: win(12.0, RESET), seven_day: win(10.0, RESET + 90 * HOUR), models: None, observed_at: Some(NOW) };
+        let result = ProbeResult { five_hour: None, seven_day: win(23.0, RESET + 90 * HOUR), models: vec![] };
+        let next = apply_probe(Some(&known), &result, NOW + 10);
+        assert_eq!(next.five_hour, None);
+        assert_eq!(next.seven_day, win(23.0, RESET + 90 * HOUR));
+        // a probe that reports nothing keeps what was known
+        let empty = ProbeResult { five_hour: None, seven_day: None, models: vec![] };
+        assert_eq!(apply_probe(Some(&known), &empty, NOW + 10).five_hour, known.five_hour);
     }
 }

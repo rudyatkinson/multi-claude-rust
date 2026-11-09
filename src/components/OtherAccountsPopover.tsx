@@ -26,7 +26,7 @@ function OtherAccount({ profile, onPick }: { profile: ProfileView; onPick(): voi
   const account = profile.account
   const loggedIn = account?.loggedIn === true
   const tokenAccount = profile.auth === 'token'
-  const plan = tokenAccount ? 'Token' : loggedIn ? planLabel(account.subscriptionType) : null
+  const plan = tokenAccount ? 'Token' : loggedIn ? planLabel(account) : null
   const limits = usageLimits(profile, usage)
   const updatedAt = usage?.observedAt ?? account?.checkedAt
   const status = !account ? 'Checking…' : loggedIn ? (limits.length === 0 ? 'No usage data' : null) : tokenAccount ? 'Token unavailable' : 'Not logged in'

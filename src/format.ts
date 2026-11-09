@@ -3,9 +3,15 @@ const PLAN_LABELS: Record<string, string> = { ultra: 'Ultra', max: 'Max', pro: '
 // English month names with a 24-hour clock
 const LOCALE = 'en-GB'
 
-export function planLabel(subscriptionType: string | undefined): string | null {
-  if (!subscriptionType) return null
-  return PLAN_LABELS[subscriptionType.toLowerCase()] ?? subscriptionType
+const TIER_LABELS: Record<string, string> = { max_20x: 'Ultra', max_5x: 'Max' }
+
+/** The plan badge of an account: the tier when Claude Code reports one (Ultra is `max_20x` of the `max` subscription), else the subscription. */
+export function planLabel(account: { subscriptionType?: string; planTier?: string } | undefined): string | null {
+  if (!account) return null
+  const tier = account.planTier?.toLowerCase()
+  if (tier) return TIER_LABELS[tier] ?? tier.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ')
+  if (!account.subscriptionType) return null
+  return PLAN_LABELS[account.subscriptionType.toLowerCase()] ?? account.subscriptionType
 }
 
 export { usageView, type UsageView } from '@shared/usage'

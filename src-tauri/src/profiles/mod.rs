@@ -345,6 +345,7 @@ impl ProfileService {
             org_id: None,
             org_name: None,
             subscription_type: None,
+            plan_tier: None,
             auth_method: token.is_some().then(|| "oauth_token".to_owned()),
             checked_at: now,
             error: None,

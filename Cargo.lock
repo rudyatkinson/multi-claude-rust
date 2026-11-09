@@ -2557,7 +2557,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mc-core"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "hex",
  "regex",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "mc-explorer-command"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "tempfile",
  "windows",
@@ -2673,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "multi-claude"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "axum",
  "chrono",

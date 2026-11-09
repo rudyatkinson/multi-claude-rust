@@ -21,6 +21,7 @@ pub fn parse_auth_status(stdout: &str, now: i64) -> AccountInfo {
         org_id: None,
         org_name: None,
         subscription_type: None,
+        plan_tier: None,
         auth_method: None,
         checked_at: now,
         error: Some(UNREADABLE.to_owned()),
@@ -40,6 +41,7 @@ pub fn parse_auth_status(stdout: &str, now: i64) -> AccountInfo {
         org_id: text(&json, "orgId"),
         org_name: text(&json, "orgName"),
         subscription_type: text(&json, "subscriptionType"),
+        plan_tier: text(&json, "planTier"),
         auth_method: text(&json, "authMethod"),
         checked_at: now,
         error: None,
@@ -57,6 +59,7 @@ mod tests {
             org_id: None,
             org_name: None,
             subscription_type: None,
+        plan_tier: None,
             auth_method: None,
             checked_at: now,
             error: None,
@@ -67,7 +70,7 @@ mod tests {
 
     #[test]
     fn reads_a_logged_in_account() {
-        let out = r#"{"loggedIn":true,"authMethod":"claude.ai","email":"a@b.co","orgId":"o1","orgName":"Org","subscriptionType":"max"}"#;
+        let out = r#"{"loggedIn":true,"authMethod":"claude.ai","email":"a@b.co","orgId":"o1","orgName":"Org","subscriptionType":"max","planTier":"max_20x"}"#;
         assert_eq!(
             parse_auth_status(out, 5),
             AccountInfo {
@@ -77,6 +80,7 @@ mod tests {
                 org_id: Some("o1".into()),
                 org_name: Some("Org".into()),
                 subscription_type: Some("max".into()),
+                plan_tier: Some("max_20x".into()),
                 checked_at: 5,
                 error: None,
             }

@@ -340,6 +340,7 @@ fn signed_in(email: Option<&str>) -> AccountInfo {
         org_id: Some("org".into()),
         org_name: None,
         subscription_type: None,
+        plan_tier: None,
         auth_method: None,
         checked_at: 1,
         error: None,

@@ -21,7 +21,7 @@ export function AccountCard({ profile, extra }: { profile: ProfileView; extra?: 
   const loggedIn = account?.loggedIn === true
   // Claude Code reports neither plan nor email for a token account
   const tokenAccount = profile.auth === 'token'
-  const plan = tokenAccount ? 'Token' : loggedIn ? planLabel(account.subscriptionType) : null
+  const plan = tokenAccount ? 'Token' : loggedIn ? planLabel(account) : null
   const override = !tokenAccount && loggedIn && account.authMethod && account.authMethod !== 'claude.ai' ? account.authMethod : null
   const hasUsage = Boolean(usage?.fiveHour || usage?.sevenDay || usage?.models?.length)
   const syncPending = profile.sync?.mainChanged ?? []

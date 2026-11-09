@@ -1,6 +1,6 @@
 {
   "name": "multi-claude",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "description": "Run Claude Code on multiple Claude accounts side by side",

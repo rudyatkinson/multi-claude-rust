@@ -15,7 +15,7 @@ export function AccountChoices({ accounts, onChoose }: { accounts: readonly Prof
   return (
     <div className="account-choices">
       {accounts.map((profile, index) => {
-        const plan = planLabel(profile.account?.subscriptionType)
+        const plan = planLabel(profile.account)
         return (
           // a div, not a <button>: the usage bars inside are block content
           <div

@@ -8,6 +8,8 @@ export interface AccountInfo {
   orgId?: string
   orgName?: string
   subscriptionType?: string
+  /** The tier within the subscription (`max_20x` is Ultra, `max_5x` is Max), when Claude Code reports it. */
+  planTier?: string
   authMethod?: string
   checkedAt: number
   error?: string

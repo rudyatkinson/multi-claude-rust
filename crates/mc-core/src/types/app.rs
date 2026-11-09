@@ -21,6 +21,10 @@ pub struct AccountInfo {
     pub org_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_type: Option<String>,
+    /// The tier within the subscription as `claude auth status` reports it (`max_20x` is Ultra,
+    /// `max_5x` is Max); older Claude Code versions do not report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_tier: Option<String>,
     /// As `claude auth status` names it, e.g. `oauth_token`. Free text, not a closed set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_method: Option<String>,
