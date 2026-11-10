@@ -29,6 +29,9 @@ use crate::state::{lock, AppState};
 
 /// How often at most the account statuses are read again when the window comes to the front.
 pub const STATUS_REFRESH_MS: i64 = 30 * 60 * 1000;
+/// How long a `claude --version` reading is trusted before the window's focus reads it again:
+/// Claude Code updates itself in the background, and the footer should follow.
+pub const CLAUDE_RECHECK_MS: i64 = 10 * 60 * 1000;
 
 /// `Date.now()`.
 pub fn now_ms() -> i64 {
@@ -77,6 +80,31 @@ pub async fn locate_claude(state: &AppState) {
     *state.claude.write().unwrap_or_else(std::sync::PoisonError::into_inner) = info;
     emit_app_changed(state);
     state.profiles.refresh_launchers(state.claude_path().as_deref());
+}
+
+/// Reads `claude --version` again. Claude Code replaces its own executable when it updates, so the
+/// version found at boot goes stale. Only a found binary replaces what is known: a reading that
+/// fails while the update is being written must not turn the app into "claude not found".
+pub async fn recheck_claude(state: &AppState) {
+    let preferred = state.profiles.config().with(|c| c.settings.claude_path.clone());
+    let info = crate::claude_binary::find_claude(preferred.as_deref()).await;
+    if info.path.is_none() {
+        return;
+    }
+    let changed = {
+        let mut known = state.claude.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *known == info {
+            false
+        } else {
+            log::info!("claude: {} ({})", info.path.as_deref().unwrap_or("?"), info.version.as_deref().unwrap_or("unknown version"));
+            *known = info;
+            true
+        }
+    };
+    if changed {
+        emit_app_changed(state);
+        state.profiles.refresh_launchers(state.claude_path().as_deref());
+    }
 }
 
 /// Reads every account's status (`profiles.refreshAll`) and notes when.

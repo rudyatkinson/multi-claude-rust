@@ -7,6 +7,7 @@ This file is shown inside the app under **What's new**.
 
 ### Fixed
 - An Ultra account was labelled Max and kept a stale 5-hour row. Claude Code now reports the plan tier (`planTier`, `max_20x` for Ultra), which the badge follows, and a `/usage` report that lists weekly limits only drops the 5-hour window instead of keeping the one from before the plan changed.
+- The Claude Code version in the sidebar footer stayed at what was found at start. Claude Code updates itself in the background; the version is now read again when the window comes to the front, at most every 10 minutes.
 
 ## [0.6.2] - 2026-11-09
 

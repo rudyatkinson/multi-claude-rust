@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager, UserAttentionType, WebviewWindow, Window, Window
 
 use crate::app::open_folder::flush_pending;
 use crate::app::quit::{hide_to_tray, request_quit};
-use crate::app::{now_ms, refresh_all_profiles, state as app_state, STATUS_REFRESH_MS};
+use crate::app::{now_ms, recheck_claude, refresh_all_profiles, state as app_state, CLAUDE_RECHECK_MS, STATUS_REFRESH_MS};
 use crate::state::{is, AppState};
 
 pub const MAIN: &str = "main";
@@ -110,6 +110,10 @@ fn focused(state: &AppState) {
     let now = now_ms();
     let refresh = now - last > STATUS_REFRESH_MS
         && state.last_status_refresh.compare_exchange(last, now, Ordering::SeqCst, Ordering::SeqCst).is_ok();
+    // Claude Code updates itself in the background: the version in the footer follows, every 10 min
+    let last_check = state.last_claude_check.load(Ordering::SeqCst);
+    let recheck = now - last_check > CLAUDE_RECHECK_MS
+        && state.last_claude_check.compare_exchange(last_check, now, Ordering::SeqCst, Ordering::SeqCst).is_ok();
     let app = state.app.clone();
     tauri::async_runtime::spawn(async move {
         // the badges hash files: off the window's thread
@@ -120,6 +124,11 @@ fn focused(state: &AppState) {
             }
         })
         .await;
+        if recheck {
+            if let Some(state) = app_state(&app) {
+                recheck_claude(&state).await;
+            }
+        }
         if refresh {
             if let Some(state) = app_state(&app) {
                 refresh_all_profiles(&state).await;

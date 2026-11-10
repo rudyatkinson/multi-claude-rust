@@ -53,6 +53,8 @@ pub struct AppState {
     pub pending_open_folders: Mutex<Vec<String>>,
     /// When the account statuses were last read (ms since the epoch; 0 for never).
     pub last_status_refresh: AtomicI64,
+    /// When `claude --version` was last read again after boot (ms since the epoch; 0 for never).
+    pub last_claude_check: AtomicI64,
     /// What has unsaved changes in the window's Library, for the quit question.
     pub unsaved: Mutex<Vec<String>>,
     /// The session the user is looking at (`ui:visible`): in front in the area that has the
@@ -137,6 +139,7 @@ impl AppState {
             flags: Flags::default(),
             pending_open_folders: Mutex::default(),
             last_status_refresh: AtomicI64::new(0),
+            last_claude_check: AtomicI64::new(0),
             unsaved: Mutex::default(),
             visible: Mutex::default(),
             hook_problem: Mutex::default(),
