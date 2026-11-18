@@ -16,14 +16,27 @@ const CLSID: GUID = GUID::from_u128(0xE00837FA_9B7A_49E7_B33B_0115A2B2C52E);
 type GetClassObject = unsafe extern "system" fn(*const GUID, *const GUID, *mut *mut c_void) -> HRESULT;
 type CanUnloadNow = unsafe extern "system" fn() -> HRESULT;
 
+const DLL: &str = "mc_explorer_command.dll";
+
+/// The profile folder of the target directory this test was built into (`target/debug`), going
+/// up from the test's executable. Cargo has kept that executable in `<profile>/deps` and, since
+/// 1.100, in `<profile>/build/<package>/<hash>/out`; either way the profile folder is the one
+/// that has `.fingerprint` or `build` in it, or the DLL itself.
+fn profile_dir() -> PathBuf {
+    let exe = std::env::current_exe().unwrap();
+    let is_profile = |dir: &Path| dir.join(DLL).is_file() || dir.join(".fingerprint").is_dir() || dir.join("build").is_dir();
+    // the executable's own folder may be named `out` inside a `build` folder: start above `deps`
+    let found = exe.ancestors().skip(1).find(|dir| dir.file_name().is_some_and(|name| name != "deps") && is_profile(dir));
+    found.unwrap_or_else(|| panic!("no target profile folder above {}", exe.display())).to_path_buf()
+}
+
 /// The DLL of this crate. `cargo test` compiles the library for the test harness but not the
 /// `cdylib` artifact, so on a fresh target (CI) the DLL is built here first, with the same profile.
 fn built_dll() -> PathBuf {
-    let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-    let profile_dir = deps.parent().unwrap().to_path_buf();
-    let candidates = [deps.join("mc_explorer_command.dll"), profile_dir.join("mc_explorer_command.dll")];
-    if let Some(found) = candidates.iter().find(|p| p.is_file()) {
-        return found.clone();
+    let profile_dir = profile_dir();
+    let dll = profile_dir.join(DLL);
+    if dll.is_file() {
+        return dll;
     }
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let mut build = std::process::Command::new(env!("CARGO"));
@@ -33,7 +46,8 @@ fn built_dll() -> PathBuf {
     }
     let status = build.status().expect("cargo runs");
     assert!(status.success(), "building the DLL failed");
-    candidates.into_iter().find(|p| p.is_file()).expect("cargo built the DLL")
+    assert!(dll.is_file(), "cargo built the DLL, but it is not at {}", dll.display());
+    dll
 }
 
 /// Takes a string the DLL allocated.
