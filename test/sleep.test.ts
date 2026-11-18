@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { canSleep, clockTime, isAsleep, sleepLabel, sleepToggle, wakesOnKey } from '../src/shared/sleep'
 import { tabMark } from '../src/shared/turn'
 import { lastPromptLine, tabLabel, topicOf } from '../src/format'
-import { sleepIdleMinutesOf } from '../src/shared/types'
+import { autoSleepOf, sleepIdleMinutesOf } from '../src/shared/types'
 
 // a moment of the local clock, whatever the time zone of the machine running the tests
 const at = (hours: number, minutes: number): number => new Date(2026, 10, 8, hours, minutes, 30).getTime()
@@ -60,6 +60,18 @@ describe('sleepIdleMinutes', () => {
     expect(sleepIdleMinutesOf({ sleepIdleMinutes: 2.6 })).toBe(3)
     expect(sleepIdleMinutesOf({ sleepIdleMinutes: -4 })).toBe(0)
     expect(sleepIdleMinutesOf({ sleepIdleMinutes: 99999 })).toBe(1440)
+  })
+})
+
+describe('autoSleep', () => {
+  it('is on unless it was switched off or the minutes say never', () => {
+    expect(autoSleepOf({})).toBe(true)
+    expect(autoSleepOf({ autoSleep: true, sleepIdleMinutes: 30 })).toBe(true)
+    expect(autoSleepOf({ autoSleep: false })).toBe(false)
+    expect(autoSleepOf({ autoSleep: false, sleepIdleMinutes: 30 })).toBe(false)
+    // "never" from before there was a switch
+    expect(autoSleepOf({ sleepIdleMinutes: 0 })).toBe(false)
+    expect(autoSleepOf({ autoSleep: true, sleepIdleMinutes: 0 })).toBe(false)
   })
 })
 

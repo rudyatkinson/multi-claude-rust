@@ -3,6 +3,7 @@ import {
   FONT_SIZE,
   PROFILE_COLORS,
   SLEEP_IDLE_MINUTES,
+  autoSleepOf,
   sleepIdleMinutesOf,
   tabStripOf,
   type AuthKind,
@@ -344,19 +345,24 @@ export function SettingsDialog() {
   const canStartWithSystem = packaged && platform !== 'linux'
   const [tabStrip, setTabStrip] = useState<TabStrip>(tabStripOf(settings))
   const [checkUpdates, setCheckUpdates] = useState(settings.checkUpdates !== false)
-  const [sleepMinutes, setSleepMinutes] = useState(String(sleepIdleMinutesOf(settings)))
+  const [autoSleep, setAutoSleep] = useState(autoSleepOf(settings))
+  // a saved 0 said "never" before there was a switch: the switch is off, and the field offers the default
+  const savedSleepMinutes = sleepIdleMinutesOf(settings) || SLEEP_IDLE_MINUTES.default
+  const [sleepMinutes, setSleepMinutes] = useState(String(savedSleepMinutes))
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault()
     const size = Number(fontSize)
-    // an emptied field keeps what was set; the main process rounds and holds it to a day
+    // an emptied field (or a 0, which the switch says now) keeps what was set; the main process
+    // rounds and holds it to a day
     const minutes = sleepMinutes.trim() === '' ? NaN : Number(sleepMinutes)
     await attempt(
       mc
         .invoke('settings:update', {
           claudePath,
           fontSize: Number.isFinite(size) ? size : settings.fontSize,
-          sleepIdleMinutes: Number.isFinite(minutes) ? minutes : sleepIdleMinutesOf(settings),
+          autoSleep,
+          sleepIdleMinutes: Number.isFinite(minutes) && minutes >= 0.5 ? minutes : savedSleepMinutes,
           restoreTabs,
           notifications,
           limitAlerts,
@@ -397,20 +403,27 @@ export function SettingsDialog() {
             <input type="checkbox" checked={notifications} onChange={(e) => setNotifications(e.target.checked)} />
             Notify when a session in the background needs input
           </label>
-          <label className="check sleep-setting">
-            Put idle sessions to sleep after
+          <div className="check sleep-setting">
+            <label className="check">
+              <input type="checkbox" checked={autoSleep} onChange={(e) => setAutoSleep(e.target.checked)} />
+              Put idle sessions to sleep after
+            </label>
             <input
               type="number"
-              min={0}
+              min={1}
               max={SLEEP_IDLE_MINUTES.max}
               step={1}
               value={sleepMinutes}
+              disabled={!autoSleep}
               aria-label="Minutes before an idle session sleeps"
               onChange={(e) => setSleepMinutes(e.target.value)}
             />
-            minutes (0 = never)
-          </label>
-          <p className="note">A sleeping tab keeps its place and its conversation but runs no process; it wakes when you click into it or type.</p>
+            minutes
+          </div>
+          <p className="note">
+            A sleeping tab keeps its place and its conversation but runs no process; it wakes when you click into it or type. Off: a tab sleeps
+            only when you put it to sleep from its menu.
+          </p>
         </div>
         <div className="field">
           <span>Accounts</span>

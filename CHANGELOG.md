@@ -3,7 +3,10 @@
 All notable changes to Multi Claude. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This file is shown inside the app under **What's new**.
 
-## [Unreleased]
+## [0.6.4] - 2026-11-18
+
+### Changed
+- Putting idle sessions to sleep is a switch in Settings → Sessions, on by default, next to the minutes. Switched off, a tab sleeps only when you choose **Sleep now**; the minutes are kept for when it is on again. A saved "0 = never" opens as switched off.
 
 ### Fixed
 - Tabs that came back asleep after a restart all looked alike: only the folder and the account, over an empty terminal, so each had to be woken to see what it was. A sleeping tab is now called by its conversation's title (as Claude Code named it, else the start of the last message), its tooltip adds the last message, and its terminal shows the output it fell asleep with. The output is kept in `replays/` in the app's data folder while the tab sleeps.

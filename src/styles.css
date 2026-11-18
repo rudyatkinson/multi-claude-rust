@@ -997,6 +997,11 @@ button:disabled {
   padding: 3px 6px;
 }
 
+/* switched off: the minutes are kept, but not in use */
+.field .sleep-setting input[type='number']:disabled {
+  opacity: 0.45;
+}
+
 .menu {
   top: 32px;
   right: 6px;

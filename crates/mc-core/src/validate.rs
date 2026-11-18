@@ -506,9 +506,9 @@ pub fn profile_patch(value: &Value) -> ProfilePatch {
 
 /// `settings:update`'s patch. Only these keys pass: `claudePath` (trimmed; anything but a text
 /// with something in it clears it), `fontSize` (rounded and held within the limits),
-/// `restoreTabs`, `notifications`, `limitAlerts`, `autoSwitch`, `tray` and `openAtLogin`
-/// (booleans), `tabStrip` (`top` or `side`), `checkUpdates` (boolean). The rest of the settings
-/// are the backend's to set.
+/// `restoreTabs`, `notifications`, `limitAlerts`, `autoSwitch`, `tray`, `openAtLogin`,
+/// `checkUpdates` and `autoSleep` (booleans), `tabStrip` (`top` or `side`), `sleepIdleMinutes`
+/// (see [`sleep_idle_minutes`]). The rest of the settings are the backend's to set.
 pub fn settings_patch(value: &Value) -> SettingsPatch {
     let Some(p) = value.as_object() else {
         return SettingsPatch::default();
@@ -524,6 +524,7 @@ pub fn settings_patch(value: &Value) -> SettingsPatch {
         tray: flag("tray"),
         open_at_login: flag("openAtLogin"),
         check_updates: flag("checkUpdates"),
+        auto_sleep: flag("autoSleep"),
         sleep_idle_minutes: p.get("sleepIdleMinutes").and_then(Value::as_f64).and_then(sleep_idle_minutes),
         tab_strip: p.get("tabStrip").and_then(Value::as_str).and_then(|s| match s {
             "top" => Some(TabStrip::Top),
@@ -884,6 +885,7 @@ mod tests {
                 open_at_login: Some(true),
                 tab_strip: Some(TabStrip::Side),
                 check_updates: None,
+                auto_sleep: None,
                 sleep_idle_minutes: None,
             }
         );
@@ -932,5 +934,36 @@ mod tests {
         // a value written into the file by hand is held to the limit as well
         settings.sleep_idle_minutes = Some(5000);
         assert_eq!(settings.sleep_after_minutes(), 1440);
+    }
+
+    #[test]
+    fn auto_sleep_is_on_unless_it_is_switched_off() {
+        let flag = |v: Value| settings_patch(&json!({ "autoSleep": v })).auto_sleep;
+        assert_eq!(flag(json!(false)), Some(false));
+        assert_eq!(flag(json!(true)), Some(true));
+        // anything but a boolean leaves the setting alone
+        assert_eq!(flag(json!(0)), None);
+        assert_eq!(flag(json!("false")), None);
+        assert_eq!(flag(json!(null)), None);
+
+        let mut settings = crate::types::AppSettings::default();
+        assert_eq!((settings.auto_sleep, settings.sleep_after_minutes()), (None, 15));
+        settings_patch(&json!({ "autoSleep": false, "sleepIdleMinutes": 30 })).apply_to(&mut settings);
+        // off: nothing sleeps by itself, and the minutes are kept for when it is on again
+        assert_eq!((settings.auto_sleep, settings.sleep_idle_minutes), (Some(false), Some(30)));
+        assert_eq!(settings.sleep_after_minutes(), 0);
+        // a patch without it keeps it
+        settings_patch(&json!({ "fontSize": 14 })).apply_to(&mut settings);
+        assert_eq!(settings.sleep_after_minutes(), 0);
+        settings_patch(&json!({ "autoSleep": true })).apply_to(&mut settings);
+        assert_eq!(settings.sleep_after_minutes(), 30);
+        // "never" from before the switch still means never
+        settings_patch(&json!({ "sleepIdleMinutes": 0 })).apply_to(&mut settings);
+        assert_eq!(settings.sleep_after_minutes(), 0);
+        // the file keeps the key only once it was set
+        let wire = serde_json::to_value(crate::types::AppSettings::default()).unwrap();
+        assert!(wire.get("autoSleep").is_none());
+        let wire = serde_json::to_value(crate::types::AppSettings { auto_sleep: Some(false), ..Default::default() }).unwrap();
+        assert_eq!(wire["autoSleep"], json!(false));
     }
 }

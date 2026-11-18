@@ -145,6 +145,13 @@ export const FONT_SIZE = { min: 8, max: 28, default: 13 } as const
 /** Minutes without activity after which a Claude tab sleeps: `sleepIdleMinutes`, 0 for never. */
 export const SLEEP_IDLE_MINUTES = { max: 1440, default: 15 } as const
 
+/**
+ * Whether idle tabs are put to sleep by themselves: on unless `autoSleep` is false, and off for
+ * a `sleepIdleMinutes` of 0, which said "never" before there was a switch.
+ */
+export const autoSleepOf = (settings: Pick<AppSettings, 'autoSleep' | 'sleepIdleMinutes'>): boolean =>
+  settings.autoSleep !== false && sleepIdleMinutesOf(settings) > 0
+
 /** `sleepIdleMinutes` as it is used: the default when missing, 0 for never. */
 export const sleepIdleMinutesOf = (settings: Pick<AppSettings, 'sleepIdleMinutes'>): number =>
   Math.min(SLEEP_IDLE_MINUTES.max, Math.max(0, Math.round(settings.sleepIdleMinutes ?? SLEEP_IDLE_MINUTES.default)))
@@ -177,6 +184,8 @@ export interface AppSettings {
   checkUpdates?: boolean
   /** Minutes without activity after which a Claude tab is put to sleep; 0 never, missing 15. */
   sleepIdleMinutes?: number
+  /** Put idle Claude tabs to sleep by themselves. On unless set to false. */
+  autoSleep?: boolean
 }
 
 export type TabStrip = 'top' | 'side'

@@ -377,8 +377,12 @@ pub struct AppSettings {
     /// Look for a new version at start and once a day. On unless set to false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_updates: Option<bool>,
+    /// Put idle Claude tabs to sleep by themselves. On unless set to false; a tab can still be
+    /// put to sleep by hand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_sleep: Option<bool>,
     /// Minutes without activity after which a Claude tab is put to sleep; 0 never, missing
-    /// [`SLEEP_IDLE_MINUTES`]`.default`.
+    /// [`SLEEP_IDLE_MINUTES`]`.default`. Kept, but not used, while `auto_sleep` is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sleep_idle_minutes: Option<u32>,
     #[serde(flatten)]
@@ -395,8 +399,12 @@ pub struct SleepIdleLimits {
 pub const SLEEP_IDLE_MINUTES: SleepIdleLimits = SleepIdleLimits { max: 1440, default: 15 };
 
 impl AppSettings {
-    /// `sleepIdleMinutes` as it is used: the default when missing, 0 for never.
+    /// `sleepIdleMinutes` as it is used: the default when missing, 0 for never. Also 0 while
+    /// `autoSleep` is switched off.
     pub fn sleep_after_minutes(&self) -> u32 {
+        if self.auto_sleep == Some(false) {
+            return 0;
+        }
         self.sleep_idle_minutes.unwrap_or(SLEEP_IDLE_MINUTES.default).min(SLEEP_IDLE_MINUTES.max)
     }
 }
@@ -426,6 +434,7 @@ impl Default for AppSettings {
             skill_folders: None,
             tab_strip: None,
             check_updates: None,
+            auto_sleep: None,
             sleep_idle_minutes: None,
             extra: Extra::new(),
         }
@@ -447,6 +456,7 @@ pub struct SettingsPatch {
     pub open_at_login: Option<bool>,
     pub tab_strip: Option<TabStrip>,
     pub check_updates: Option<bool>,
+    pub auto_sleep: Option<bool>,
     pub sleep_idle_minutes: Option<u32>,
 }
 
@@ -473,6 +483,7 @@ impl SettingsPatch {
             (self.tray, &mut settings.tray),
             (self.open_at_login, &mut settings.open_at_login),
             (self.check_updates, &mut settings.check_updates),
+            (self.auto_sleep, &mut settings.auto_sleep),
         ];
         for (value, slot) in flags {
             if value.is_some() {
