@@ -3,7 +3,7 @@ import { panelKindOf, type Group, type PanelKind } from '@shared/layout'
 import { tabMark } from '@shared/turn'
 import type { ProfileView, SessionInfo } from '@shared/types'
 import { isActiveRun } from '@shared/workflows'
-import { tabLabel, usageView } from '../format'
+import { lastPromptLine, tabLabel, topicOf, usageView } from '../format'
 import { useUnsaved } from '../library'
 import { closeTab, finishRename, openTabMenu, refocus, setActive, startRename, useStore, type TabState } from '../store'
 import { LibraryIcon, WorkflowIcon } from './icons'
@@ -94,7 +94,7 @@ export function viewsOf(group: Group, { sessions, profiles, tabStatus, attention
       busy: status?.busy === true,
       busySince: status?.busySince
     })
-    const topic = status?.topic ?? null
+    const topic = topicOf(session, status)
     const title = tabLabel(session, topic)
     return [
       {
@@ -103,7 +103,7 @@ export function viewsOf(group: Group, { sessions, profiles, tabStatus, attention
         title,
         // the folder moves to the second line once the tab is called something else
         detail: [title === session.title ? null : session.title, profile?.name, session.model].filter(Boolean).join(' · '),
-        tooltip: [asleep ? sign.label : null, session.name, topic, session.cwd, profile?.name].filter(Boolean).join('\n'),
+        tooltip: [asleep ? sign.label : null, session.name, topic, asleep ? lastPromptLine(session) : null, session.cwd, profile?.name].filter(Boolean).join('\n'),
         accent: profile?.color ?? '#888',
         account: profile?.name,
         classes: [sign.state === 'ended' && 'exited', asleep && 'asleep', attention[session.id] && 'attention'].filter((c): c is string => !!c),

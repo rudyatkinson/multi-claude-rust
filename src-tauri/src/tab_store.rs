@@ -328,14 +328,19 @@ pub fn snapshot(layout: &Layout, open: &[(String, SavedTab)]) -> SavedTabs {
 /// Whether the tab's conversation exists on disk. Claude Code only writes it once a message has
 /// been sent, and resuming an id without one fails.
 pub fn has_transcript(config_dir: &Path, claude_session_id: Option<&str>, transcript_path: Option<&str>) -> bool {
-    let Some(id) = claude_session_id.filter(|id| !id.is_empty()) else { return false };
-    if transcript_path.is_some_and(|p| !p.is_empty() && Path::new(p).exists()) {
-        return true;
+    transcript_file(config_dir, claude_session_id, transcript_path).is_some()
+}
+
+/// The file of the tab's conversation, if it exists on disk (see [`has_transcript`]).
+pub fn transcript_file(config_dir: &Path, claude_session_id: Option<&str>, transcript_path: Option<&str>) -> Option<PathBuf> {
+    let id = claude_session_id.filter(|id| !id.is_empty())?;
+    if let Some(path) = transcript_path.filter(|p| !p.is_empty()).map(Path::new).filter(|p| p.exists()) {
+        return Some(path.to_owned());
     }
     // no path reported yet: conversations live in <config>/projects/<folder key>/<id>.jsonl
-    let Ok(dirs) = std::fs::read_dir(config_dir.join("projects")) else { return false };
+    let dirs = std::fs::read_dir(config_dir.join("projects")).ok()?;
     let file = format!("{id}.jsonl");
-    dirs.flatten().any(|dir| dir.path().join(&file).exists())
+    dirs.flatten().map(|dir| dir.path().join(&file)).find(|path| path.exists())
 }
 
 /// Whether Claude Code has a conversation of the folder `cwd` on disk, which `claude -c` would

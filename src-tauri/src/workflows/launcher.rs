@@ -303,6 +303,8 @@ mod tests {
                 arrived: None,
                 keep_awake: false,
                 slept_at: None,
+                topic: None,
+                last_prompt: None,
             }
         }
 

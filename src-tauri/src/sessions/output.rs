@@ -160,6 +160,15 @@ impl OutputBuffer {
         self.seq
     }
 
+    /// The buffer of a tab that comes back asleep from the last run with the output it had then:
+    /// `text` is its replay (the last [`REPLAY_LIMIT`] units of it), and `seq` starts after it.
+    pub fn seeded(text: &str) -> OutputBuffer {
+        let (at, _) = tail_start(text, len16(text), REPLAY_LIMIT);
+        let replay = text[at..].to_owned();
+        let units = len16(&replay);
+        OutputBuffer { replay, replay_units: units, seq: units as u64, ..OutputBuffer::default() }
+    }
+
     /// The buffer of a process that takes over from this one in the same tab (a session woken
     /// from its sleep): the replay and `seq` go on from here, so that the window keeps what it
     /// shows and takes the new output as what follows it. What waits to be sent is not carried.
@@ -410,6 +419,27 @@ mod tests {
         next.push(b" after");
         assert_eq!(next.take(), Some((" after".to_owned(), 15)));
         assert_eq!(next.replay(), "before 😀 after");
+    }
+
+    #[test]
+    fn a_seeded_buffer_replays_what_it_was_given_and_goes_on_after_it() {
+        let mut out = OutputBuffer::seeded("before 😀");
+        assert_eq!(out.replay(), "before 😀");
+        assert_eq!(out.seq(), 9);
+        assert!(!out.has_pending());
+        // a process that takes over goes on from there
+        let mut next = out.carried_over();
+        next.push(b" after");
+        assert_eq!(next.take(), Some((" after".to_owned(), 15)));
+        out.push(b"!");
+        assert_eq!(out.take(), Some(("!".to_owned(), 10)));
+        // more than the replay holds: the end of it is kept
+        let long = format!("{}end", "x".repeat(REPLAY_LIMIT));
+        let cut = OutputBuffer::seeded(&long);
+        assert_eq!(len16(cut.replay()), REPLAY_LIMIT);
+        assert!(cut.replay().ends_with("end"));
+        assert_eq!(cut.seq(), REPLAY_LIMIT as u64);
+        assert_eq!(OutputBuffer::seeded("").seq(), 0);
     }
 
     #[test]

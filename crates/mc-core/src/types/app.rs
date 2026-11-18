@@ -278,6 +278,14 @@ pub struct SessionInfo {
     /// When the session went to sleep; set while it is [`SessionStatus::Sleeping`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slept_at: Option<i64>,
+    /// What the conversation of a sleeping tab is about, as Claude Code titled it (else the start
+    /// of its last message): read from the conversation file when the tab falls asleep or comes
+    /// back asleep, since no process is there to say it. Gone once the tab is woken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    /// The last message typed in the conversation of a sleeping tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_prompt: Option<String>,
 }
 
 /// `last` continues the folder's most recent conversation; `pick` opens Claude Code's conversation list.

@@ -67,6 +67,8 @@ fn info(id: &str, kind: SessionKind) -> SessionInfo {
         arrived: None,
         keep_awake: false,
         slept_at: None,
+        topic: None,
+        last_prompt: None,
     }
 }
 
@@ -710,11 +712,15 @@ fn a_tab_of_the_last_run_comes_back_asleep_without_a_process() {
         claude_session_id: Some("c1".into()),
         transcript_path: Some("/t/c1.jsonl".into()),
         request: req,
+        preview: Preview::default(),
+        replay: None,
     });
     assert_eq!((info.id.as_str(), info.status, info.title.as_str()), ("s", SessionStatus::Sleeping, "app"));
     assert!(info.slept_at.is_some());
+    assert_eq!((info.topic, info.last_prompt), (None, None));
     // announced with the other restored tabs
     assert!(rec.lists().is_empty());
+    // nothing was kept of its output
     let attached = manager.attach("s").unwrap();
     assert_eq!((attached.replay.as_str(), attached.seq), ("", 0));
     assert_eq!(manager.request_of("s").unwrap().prompt, None);
@@ -734,6 +740,55 @@ fn a_tab_of_the_last_run_comes_back_asleep_without_a_process() {
     assert!(!manager.has_running());
     manager.close("s");
     assert!(lock(&cleanups).is_empty());
+}
+
+#[test]
+fn a_tab_that_comes_back_asleep_shows_its_last_output_and_its_topic() {
+    let (rec, manager) = manager();
+    let info = manager.create_sleeping(SleepingTab {
+        id: "s".into(),
+        profile_id: "work".into(),
+        cwd: "/proj/app".into(),
+        name: None,
+        claude_session_id: Some("c1".into()),
+        transcript_path: None,
+        request: request("/proj/app", SessionKind::Claude),
+        preview: Preview { topic: Some("Fix the login flow".into()), last_prompt: Some("now run the tests".into()) },
+        replay: Some("last screen 😀".into()),
+    });
+    assert_eq!(info.topic.as_deref(), Some("Fix the login flow"));
+    assert_eq!(info.last_prompt.as_deref(), Some("now run the tests"));
+    // the folder stays its title: the topic is shown in its place by the window
+    assert_eq!(info.title, "app");
+    let attached = manager.attach("s").unwrap();
+    assert_eq!((attached.replay.as_str(), attached.seq), ("last screen 😀", 14));
+    assert_eq!(attached.info.topic.as_deref(), Some("Fix the login flow"));
+    // the replay was not sent: the window takes it when it attaches
+    assert!(lock(&rec.data).is_empty());
+}
+
+#[test]
+fn falling_asleep_asks_what_the_tab_shows_and_hands_over_its_output() {
+    let (_rec, manager) = manager();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let calls = seen.clone();
+    manager.set_slept_handler(Box::new(move |slept: &Slept| {
+        lock(&calls).push((slept.info.id.clone(), slept.transcript_path.clone(), slept.replay.clone()));
+        Preview { topic: Some("Fix the login flow".into()), last_prompt: Some("now run the tests".into()) }
+    }));
+    let (_log, exited) = fake_running(&manager, "a");
+    {
+        let mut t = manager.table();
+        let live = t.live.get_mut("a").unwrap();
+        live.transcript_path = Some("/t/c1.jsonl".into());
+        live.stream.push(b"last screen");
+        live.to_sleep = true;
+    }
+    fake_exit(&manager, "a", &exited);
+    let info = manager.get("a").unwrap();
+    assert_eq!(info.status, SessionStatus::Sleeping);
+    assert_eq!((info.topic.as_deref(), info.last_prompt.as_deref()), (Some("Fix the login flow"), Some("now run the tests")));
+    assert_eq!(*lock(&seen), vec![("a".to_owned(), Some("/t/c1.jsonl".to_owned()), "last screen".to_owned())]);
 }
 
 #[test]

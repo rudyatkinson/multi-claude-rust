@@ -128,6 +128,8 @@ fn session_with_a_turn() {
     assert!(wire.get("moving").is_none());
     assert!(wire.get("keepAwake").is_none());
     assert!(wire.get("sleptAt").is_none());
+    assert!(wire.get("topic").is_none());
+    assert!(wire.get("lastPrompt").is_none());
     assert_eq!(wire["turn"], json!({ "kind": "done", "at": 5 }));
 
     // a sleeping tab, kept awake once it is woken
@@ -140,11 +142,15 @@ fn session_with_a_turn() {
         "status": "sleeping",
         "startedAt": 1,
         "keepAwake": true,
-        "sleptAt": 1731000002000_i64
+        "sleptAt": 1731000002000_i64,
+        "topic": "Fix the login flow",
+        "lastPrompt": "now run the tests"
     }));
     assert_eq!(asleep.status, SessionStatus::Sleeping);
     assert!(asleep.keep_awake);
     assert_eq!(asleep.slept_at, Some(1731000002000));
+    assert_eq!(asleep.topic.as_deref(), Some("Fix the login flow"));
+    assert_eq!(asleep.last_prompt.as_deref(), Some("now run the tests"));
 
     for turn in [
         json!({ "kind": "working", "at": 1 }),

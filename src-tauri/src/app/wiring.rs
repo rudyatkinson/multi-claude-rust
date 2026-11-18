@@ -21,7 +21,10 @@ use crate::limit_log;
 use crate::mcp_servers::BoxFuture;
 use crate::profiles::AccountCli;
 use crate::session_alerts::AlertDeps;
+use crate::sessions::{Preview, Slept};
+use crate::sleep_view;
 use crate::state::AppState;
+use crate::tab_store::transcript_file;
 use crate::usage::{ProbeDeps, ProbeProfile};
 
 /// Sets every handler. Call once, right after the state is managed.
@@ -93,6 +96,22 @@ fn wire_sessions(app: &AppHandle, state: &AppState) {
                 notice(&state, NoticeLevel::Warn, format!("The login for \"{}\" was not completed.", profile.name));
             }
         });
+    }));
+
+    // a tab fell asleep: its output is kept for the next run, and its tab says what the
+    // conversation is about (the terminal title that said it is gone with the process)
+    let handle = app.clone();
+    state.sessions.set_slept_handler(Box::new(move |slept: &Slept| {
+        let Some(state) = app_state(&handle) else { return Preview::default() };
+        let id = slept.info.claude_session_id.as_deref();
+        if let Some(id) = id {
+            sleep_view::save_replay(&state.root, id, &slept.replay);
+        }
+        state
+            .config_dir_of(&slept.info.profile_id)
+            .and_then(|dir| transcript_file(&dir, id, slept.transcript_path.as_deref()))
+            .map(|file| sleep_view::preview_of(&file))
+            .unwrap_or_default()
     }));
 
     // `cleanupSettings`

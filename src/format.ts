@@ -49,6 +49,25 @@ export function accountInitials(name: string, allNames: readonly string[]): stri
   return shared && letters[1] ? first + letters[1].toLowerCase() : first
 }
 
+/**
+ * The topic of a session's conversation: what its terminal title says, else what the app read
+ * from the conversation file of a sleeping tab.
+ */
+export function topicOf(session: { topic?: string }, status?: { topic: string | null } | null): string | null {
+  return status?.topic ?? session.topic ?? null
+}
+
+/** How much of a sleeping tab's last message its tooltip shows. */
+const LAST_PROMPT_CHARS = 200
+
+/** The line a sleeping tab's tooltip has for the last message typed in it; null when there is none. */
+export function lastPromptLine(session: { lastPrompt?: string }): string | null {
+  const text = session.lastPrompt?.replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  const letters = Array.from(text)
+  return `Last message: ${letters.length > LAST_PROMPT_CHARS ? `${letters.slice(0, LAST_PROMPT_CHARS).join('')}…` : text}`
+}
+
 /** What a tab is called: the name the user gave it, else the conversation's topic, else its folder. */
 export function tabLabel(session: { name?: string; title: string }, topic?: string | null): string {
   return session.name ?? topic ?? session.title

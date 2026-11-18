@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { canSleep, clockTime, isAsleep, sleepLabel, sleepToggle, wakesOnKey } from '../src/shared/sleep'
 import { tabMark } from '../src/shared/turn'
+import { lastPromptLine, tabLabel, topicOf } from '../src/format'
 import { sleepIdleMinutesOf } from '../src/shared/types'
 
 // a moment of the local clock, whatever the time zone of the machine running the tests
@@ -59,5 +60,30 @@ describe('sleepIdleMinutes', () => {
     expect(sleepIdleMinutesOf({ sleepIdleMinutes: 2.6 })).toBe(3)
     expect(sleepIdleMinutesOf({ sleepIdleMinutes: -4 })).toBe(0)
     expect(sleepIdleMinutesOf({ sleepIdleMinutes: 99999 })).toBe(1440)
+  })
+})
+
+describe('what a sleeping tab is called', () => {
+  const tab = { title: 'app', topic: 'Fix the login flow', lastPrompt: 'now run\n the tests' }
+
+  it('takes the topic the app read for it when no terminal title says one', () => {
+    // after a restart the window has never seen a title of the tab
+    expect(topicOf(tab, undefined)).toBe('Fix the login flow')
+    expect(topicOf(tab, { topic: null })).toBe('Fix the login flow')
+    expect(tabLabel(tab, topicOf(tab, undefined))).toBe('Fix the login flow')
+    // what the terminal says wins, and the user's own name wins over both
+    expect(topicOf(tab, { topic: 'Review the PR' })).toBe('Review the PR')
+    expect(tabLabel({ ...tab, name: 'Build' }, topicOf(tab, undefined))).toBe('Build')
+    // neither: the folder
+    expect(topicOf({}, undefined)).toBeNull()
+    expect(tabLabel({ title: 'app' }, topicOf({}, { topic: null }))).toBe('app')
+  })
+
+  it('shows the last message on one line, cut when it is long', () => {
+    expect(lastPromptLine(tab)).toBe('Last message: now run the tests')
+    expect(lastPromptLine({})).toBeNull()
+    expect(lastPromptLine({ lastPrompt: '  \n ' })).toBeNull()
+    const long = lastPromptLine({ lastPrompt: 'x'.repeat(500) })
+    expect(long).toBe(`Last message: ${'x'.repeat(200)}…`)
   })
 })

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { tabLabel } from '../format'
+import { tabLabel, topicOf } from '../format'
 import { setModal, transferSession, useStore } from '../store'
 import { AccountChoices } from './AccountChoices'
 import { Dialog } from './Dialogs'
@@ -28,7 +28,7 @@ export function TransferDialog({ sessionId }: { sessionId: string }) {
   return (
     <Dialog title="Continue on another account" onClose={close}>
       <div className="open-folder-path" title={session.cwd}>
-        <span className="open-folder-name">{tabLabel(session, status?.topic)}</span>
+        <span className="open-folder-name">{tabLabel(session, topicOf(session, status))}</span>
         <span className="muted small">
           {source?.name} · {session.cwd}
         </span>

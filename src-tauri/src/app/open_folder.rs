@@ -10,8 +10,9 @@ use crate::app::launch::plan_session;
 use crate::app::notice;
 use crate::events::{self, NoticeLevel};
 use crate::sessions::{new_session_id, SleepingTab};
+use crate::sleep_view;
 use crate::state::{is, lock, AppState};
-use crate::tab_store::{plan_restore_on_disk, restored_layout};
+use crate::tab_store::{plan_restore_on_disk, restored_layout, transcript_file};
 
 /// `requestOpenFolder`: queues a folder for the window, once it is known to be one.
 pub fn request_open_folder(state: &AppState, folder: &str) {
@@ -41,8 +42,9 @@ pub fn flush_pending(state: &AppState) {
 }
 
 /// `restoreTabs`: reopens the tabs of the last run. Each continues its conversation, or starts
-/// fresh if it never had one; a tab that was asleep comes back asleep, without a process. All are
-/// announced at once, with the arrangement they belong in.
+/// fresh if it never had one; a tab that was asleep comes back asleep, without a process, showing
+/// the output it fell asleep with and what its conversation is about. All are announced at once,
+/// with the arrangement they belong in.
 ///
 /// From the first session started until that announcement, what the window reports of its
 /// layout is ignored (`ui:layout`, see [`Flags::restoring_layout`](crate::state::Flags)): it is
@@ -52,6 +54,9 @@ fn restore_tabs(state: &AppState) {
         return;
     }
     let plan = plan_restore_on_disk(&state.tabs.load(), |id| state.config_dir_of(id));
+    // the outputs kept for sleeping tabs that do not come back go
+    let asleep = plan.requests.iter().filter(|tab| tab.asleep).filter_map(|tab| tab.resume.as_ref()).map(|r| r.id.clone()).collect();
+    sleep_view::prune_replays(&state.root, &asleep);
     if plan.requests.is_empty() && plan.panels.is_empty() {
         return;
     }
@@ -78,14 +83,22 @@ fn restore_tabs(state: &AppState) {
             };
             if tab.asleep {
                 // it was asleep: it comes back asleep, and starts only when it is woken
+                let conversation = tab.resume.as_ref().map(|r| r.id.clone());
+                let preview = state
+                    .config_dir_of(&tab.profile_id)
+                    .and_then(|dir| transcript_file(&dir, conversation.as_deref(), tab.transcript_path.as_deref()))
+                    .map(|file| sleep_view::preview_of(&file))
+                    .unwrap_or_default();
                 let info = state.sessions.create_sleeping(SleepingTab {
                     id: new_session_id(),
                     profile_id: request.profile_id.clone(),
                     cwd: request.cwd.clone(),
                     name: request.name.clone(),
-                    claude_session_id: tab.resume.as_ref().map(|r| r.id.clone()),
+                    replay: conversation.as_deref().and_then(|id| sleep_view::load_replay(&state.root, id)),
+                    claude_session_id: conversation,
                     transcript_path: tab.transcript_path.clone(),
                     request: SessionRequest { resume: None, ..request },
+                    preview,
                 });
                 return Some(info.id);
             }

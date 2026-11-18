@@ -45,7 +45,7 @@ import { FONT_SIZE, type AppState, type Notice, type ResumeMode, type SessionInf
 import { freeStepName, type Workflow, type WorkflowRun, type WorkflowStep } from '@shared/workflows'
 import { errorMessage, getAppVersion, listening, mc } from './api'
 import type { LibrarySection } from './library'
-import { tabLabel } from './format'
+import { tabLabel, topicOf } from './format'
 import type { DropMark, DropPreview } from './tabDrag'
 import { clearSearch, disposeMissing, focusTerminal, handlePtyData, setFontSize } from './terminal/terminalRegistry'
 
@@ -269,7 +269,7 @@ export function refocus(): void {
 
 /** What the tab of a session is called right now. */
 function labelOf(session: SessionInfo): string {
-  return tabLabel(session, get().tabStatus[session.id]?.topic)
+  return tabLabel(session, topicOf(session, get().tabStatus[session.id]))
 }
 
 // ---------- layout: the areas and their tabs ----------

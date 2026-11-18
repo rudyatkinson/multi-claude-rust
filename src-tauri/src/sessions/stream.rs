@@ -44,6 +44,12 @@ impl Stream {
         Self::with_buffer(id, outlet, buf)
     }
 
+    /// The stream of a tab that comes back asleep with the output it had in the last run (see
+    /// [`OutputBuffer::seeded`]).
+    pub(crate) fn seeded(id: String, outlet: Arc<dyn Outlet>, replay: &str) -> Arc<Self> {
+        Self::with_buffer(id, outlet, OutputBuffer::seeded(replay))
+    }
+
     fn with_buffer(id: String, outlet: Arc<dyn Outlet>, buf: OutputBuffer) -> Arc<Self> {
         let state = State { buf, ..State::default() };
         Arc::new(Stream { id, state: Mutex::new(state), wake: Condvar::new(), outlet, last_output: AtomicI64::new(now_ms()) })

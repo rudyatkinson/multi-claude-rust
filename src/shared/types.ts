@@ -128,6 +128,13 @@ export interface SessionInfo {
   keepAwake?: true
   /** When the session went to sleep (epoch ms), while it sleeps. */
   sleptAt?: number
+  /**
+   * What the conversation of a sleeping tab is about, read from its conversation file: no process
+   * is there to say it in the terminal title, and after a restart the window never saw one.
+   */
+  topic?: string
+  /** The last message typed in the conversation of a sleeping tab. */
+  lastPrompt?: string
 }
 
 export type SessionStatus = 'running' | 'exited' | 'sleeping'

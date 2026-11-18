@@ -9,8 +9,9 @@
 //! What the Electron version took as `SessionDeps` comes in two parts here: the profile, the
 //! claude path and the environment go into a [`SpawnPlan`] (see [`SessionManager::plan`]), and
 //! the reactions are handlers set once at startup: [`SessionManager::set_changed_handler`] (the
-//! work `emitSessions` did besides sending), [`SessionManager::set_exit_handler`] (`onExit`) and
-//! [`SessionManager::set_cleanup_handler`] (`cleanupSettings`).
+//! work `emitSessions` did besides sending), [`SessionManager::set_exit_handler`] (`onExit`),
+//! [`SessionManager::set_cleanup_handler`] (`cleanupSettings`) and
+//! [`SessionManager::set_slept_handler`] (what a tab that fell asleep keeps showing).
 //!
 //! A Claude session can also sleep ([`SessionManager::sleep`]): its process ends, but the session
 //! stays in the list under its id, as [`SessionStatus::Sleeping`], with its output, name and
@@ -130,6 +131,7 @@ impl std::fmt::Debug for SpawnPlan {
 type ExitFn = dyn Fn(SessionInfo) + Send + Sync;
 type ChangedFn = dyn Fn(&[SessionInfo]) -> Option<Layout> + Send + Sync;
 type CleanupFn = dyn Fn(&str, &str) + Send + Sync;
+type SleptFn = dyn Fn(&Slept) -> Preview + Send + Sync;
 
 /// `onExit`: a session's process ended (called once its list was sent).
 pub type ExitHandler = Box<ExitFn>;
@@ -139,12 +141,33 @@ pub type ExitHandler = Box<ExitFn>;
 pub type ChangedHandler = Box<ChangedFn>;
 /// `cleanupSettings(profileId, sessionId)`: the session's settings file and hook address can go.
 pub type CleanupHandler = Box<CleanupFn>;
+/// A session fell asleep (called before its list is sent): what its tab says of the conversation
+/// while it sleeps. The handler also keeps the output for the next run.
+pub type SleptHandler = Box<SleptFn>;
+
+/// A session that just fell asleep, as its [`SleptHandler`] sees it.
+#[derive(Debug, Clone)]
+pub struct Slept {
+    pub info: SessionInfo,
+    /// Where Claude Code keeps the conversation, if its status line has said so.
+    pub transcript_path: Option<String>,
+    /// The output the tab keeps (its replay).
+    pub replay: String,
+}
+
+/// What a sleeping tab says of its conversation (see [`SessionInfo::topic`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Preview {
+    pub topic: Option<String>,
+    pub last_prompt: Option<String>,
+}
 
 #[derive(Default)]
 struct Handlers {
     exit: Option<Arc<ExitFn>>,
     changed: Option<Arc<ChangedFn>>,
     cleanup: Option<Arc<CleanupFn>>,
+    slept: Option<Arc<SleptFn>>,
 }
 
 /// The pty of a running session.
@@ -200,6 +223,10 @@ pub struct SleepingTab {
     pub transcript_path: Option<String>,
     /// What it is started as when it wakes; its `resume` is decided then.
     pub request: SessionRequest,
+    /// What its conversation is about, for its tab.
+    pub preview: Preview,
+    /// The output it had when it fell asleep, if that was kept.
+    pub replay: Option<String>,
 }
 
 /// What the idle check reads of a session (see `crate::sleep`).
@@ -393,6 +420,10 @@ impl SessionManager {
 
     pub fn set_cleanup_handler(&self, handler: CleanupHandler) {
         self.inner.handlers.write().unwrap_or_else(|e| e.into_inner()).cleanup = Some(Arc::from(handler));
+    }
+
+    pub fn set_slept_handler(&self, handler: SleptHandler) {
+        self.inner.handlers.write().unwrap_or_else(|e| e.into_inner()).slept = Some(Arc::from(handler));
     }
 
     fn handlers(&self) -> std::sync::RwLockReadGuard<'_, Handlers> {
@@ -616,6 +647,8 @@ impl SessionManager {
             arrived: None,
             keep_awake: false,
             slept_at: None,
+            topic: None,
+            last_prompt: None,
         };
         let old = {
             let mut t = self.table();
@@ -706,10 +739,11 @@ impl SessionManager {
     }
 
     /// A tab that comes back asleep from the last run: it joins the list as
-    /// [`SessionStatus::Sleeping`] with an empty replay and no process, without being announced
-    /// ([`Self::announce`] does that, as after [`Self::start`]).
+    /// [`SessionStatus::Sleeping`] with no process, without being announced ([`Self::announce`]
+    /// does that, as after [`Self::start`]). Its replay is the output it fell asleep with, when
+    /// that was kept, and its tab says what its conversation is about.
     pub fn create_sleeping(&self, tab: SleepingTab) -> SessionInfo {
-        let SleepingTab { id, profile_id, cwd, name, claude_session_id, transcript_path, mut request } = tab;
+        let SleepingTab { id, profile_id, cwd, name, claude_session_id, transcript_path, mut request, preview, replay } = tab;
         request.prompt = None;
         let now = now_ms();
         let info = SessionInfo {
@@ -732,6 +766,8 @@ impl SessionManager {
             arrived: None,
             keep_awake: false,
             slept_at: Some(now),
+            topic: preview.topic,
+            last_prompt: preview.last_prompt,
         };
         // nothing will ever run in it: its end has come already
         let (_tx, exited) = watch::channel(true);
@@ -741,7 +777,7 @@ impl SessionManager {
             transcript_path,
             pty: None,
             ending: false,
-            stream: Stream::new(id.clone(), self.inner.outlet.clone()),
+            stream: Stream::seeded(id.clone(), self.inner.outlet.clone(), replay.as_deref().unwrap_or_default()),
             exited,
             intro: None,
             last_input_at: now,
@@ -811,6 +847,9 @@ impl SessionManager {
                     info.exit_code = None;
                     info.started_at = now;
                     info.slept_at = None;
+                    // its terminal title says it from here on
+                    info.topic = None;
+                    info.last_prompt = None;
                     info.turn = None;
                     // the mark of whoever woke it: it is awake now, and the list says so
                     info.moving = false;
@@ -911,9 +950,14 @@ impl SessionManager {
         }
         self.cleanup(profile_id, id);
         if asleep {
+            let preview = self.fell_asleep(id, stream);
             let mut t = self.table();
             info = t.live.get_mut(id).filter(mine).map(|live| {
                 live.info.moving = false;
+                if let Some(preview) = preview {
+                    live.info.topic = preview.topic;
+                    live.info.last_prompt = preview.last_prompt;
+                }
                 live.info.clone()
             });
         }
@@ -927,6 +971,19 @@ impl SessionManager {
         if let Some(on_exit) = handler {
             on_exit(info);
         }
+    }
+
+    /// Hands a session that just fell asleep to the [`SleptHandler`], outside the lock (it reads
+    /// and writes files). None when there is no handler or the tab was closed meanwhile.
+    fn fell_asleep(&self, id: &str, stream: &Arc<Stream>) -> Option<Preview> {
+        let handler = self.handlers().slept.clone()?;
+        let (info, transcript_path) = {
+            let t = self.table();
+            let live = t.live.get(id).filter(|l| Arc::ptr_eq(&l.stream, stream))?;
+            (live.info.clone(), live.transcript_path.clone())
+        };
+        let (replay, _) = stream.attach();
+        Some(handler(&Slept { info, transcript_path, replay }))
     }
 
     // ---------- the window's calls ----------
